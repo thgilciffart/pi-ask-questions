@@ -1,6 +1,6 @@
 {
 	"name": "pi-ask-questions",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Interactive questionnaires for Pi: tabs, multi-select, free-form typing, validation, and structured answers.",
 	"keywords": [
 		"pi-package",

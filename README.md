@@ -8,7 +8,7 @@ Interactive questionnaires for [Pi](https://pi.dev): the model runs an `ask_user
 ```text
 ────────────────────────────────────────────────────────────
  ask_user demo
- ✓ Scope  ◐ Release  · Notes  Submit
+ Scope  Release  Notes  Submit
 ────────────────────────────────────────────────────────────
  Which parts of the project should this change touch?
  Select one or more • Space toggles
@@ -19,7 +19,10 @@ Interactive questionnaires for [Pi](https://pi.dev): the model runs an `ask_user
        The interactive questionnaire renderer
    [ ] 3. Documentation
    [x] 4. Tests
-   ✎ Type something…
+   Type something…
+   ──────────────────────────────────────────────
+    custom answer
+   ──────────────────────────────────────────────
 
  ↑↓ move • Space toggle • A all • C clear • 1-9 jump • Enter confirm
 ────────────────────────────────────────────────────────────
@@ -41,16 +44,18 @@ Once installed, run `/ask-demo` to preview the UI, or just let the model call `a
 
 ## Features
 
-- **Tabs** — every question gets a tab with live status (`○` unanswered, `◐` partially answered, `✓` answered, `·` skipped). Move with `Tab` / `Shift+Tab` or `←` / `→`.
+- **Tabs** — every question gets a tab, with answered state shown by color (green = answered, accent = partially answered, muted = untouched). Move with `Tab` / `Shift+Tab`.
 - **Single-select** radio options with optional descriptions.
 - **Multi-select** checkboxes (`multiple: true`), including `min` / `max` validation, `A` to select all, and `C` to clear.
-- **Free-form typing** — a question without options is a plain text prompt. Typed answers are supported on option questions too via the built-in “Type something…” entry, and multiple-choice questions can collect several typed answers.
-- **Multiple answers** — return any number of selections and typed entries per question.
+- **Free-form typing** — a question without options is a plain text prompt. Option questions can also hold one typed answer unless `allowOther: false`.
+- **Inline editing** — move the cursor onto “Type something…” and type; the editor appears directly under the row with the options still visible. No separate menu, and the answer can be edited again in place.
+- **One typed answer per question** — typed answers are never duplicated; editing replaces the previous text.
 - **Optional questions** (`required: false`) that can be skipped, plus preset answers (`selected: true`) and defaults.
 - **Review tab** — see everything before submitting; jump back to any question to edit it.
 - **Validation** — required answers and `min`/`max` selection counts are enforced before submit.
+- **Background mode** — set `noWait: true` and the tool returns immediately while the questionnaire stays open; the answers arrive later as a follow-up message.
 - **Safe cancel** — `Esc` arms cancellation, a second `Esc` or `Ctrl+C` cancels immediately.
-- **Scrollable option lists** — long lists show `↑ n more` / `↓ n more` indicators.
+- **Scrollable option lists** — long lists show “n more above / below” indicators.
 - **Structured results** — the tool returns text for the model and a machine-readable `structuredContent` payload for codemode scripts.
 
 ## How the model uses it
@@ -125,26 +130,28 @@ Notes: (skipped)
 | `questions[].min` / `max` | integer | Selection bounds for multi-select. |
 | `questions[].placeholder` | string | Placeholder for the free-form editor. |
 | `questions[].otherLabel` | string | Custom label for the typed-answer entry. |
+| `noWait` | boolean | Show the questionnaire in the background and return immediately (interactive TUI only). The answers arrive as a follow-up message. Only one background questionnaire can be open at a time. |
 
 ### Keyboard reference
 
 | Keys | Action |
 | --- | --- |
-| `Tab` / `Shift+Tab`, `←` / `→` | Switch tabs |
+| `Tab` / `Shift+Tab` | Switch tabs |
 | `↑` / `↓`, `Home` / `End` | Move the option cursor |
 | `Space` | Toggle a checkbox / select a radio option |
 | `1`–`9` | Jump to an option (toggles it in multi-select) |
 | `A` / `C` | Select all / clear (multi-select) |
-| `Enter` | Confirm the question, open the editor, or submit |
-| `Esc` | Leave the editor, arm cancel; `Esc` twice cancels |
+| `Enter` | Confirm the question, or submit on the review tab |
+| `Esc` | Arm cancel; `Esc` twice cancels |
 | `Ctrl+C` | Cancel immediately |
-| `\` + `Enter` | Newline in the free-form editor |
+| `\` + `Enter` | Newline in a free-form answer |
 
 ## Modes
 
 | Mode | Behavior |
 | --- | --- |
 | Interactive TUI | Full tabbed questionnaire. |
+| Interactive TUI + `noWait` | Tool returns immediately; answers are delivered as a follow-up message. |
 | RPC | Sequential fallback built from the dialog API (`select` / `input`). |
 | Print / JSON | The tool reports that no UI is available and lists the questions so the model can ask them in plain text. |
 
