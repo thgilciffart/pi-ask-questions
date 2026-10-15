@@ -80,7 +80,7 @@ describe("normalizeQuestions", () => {
 		});
 	});
 
-	it("treats questions without options as free-form", () => {
+	it("treats questions without options as free-form with a single typed answer", () => {
 		const question = normalize({
 			question: "Anything else?",
 			allowOther: false,
@@ -90,8 +90,9 @@ describe("normalizeQuestions", () => {
 		});
 		assert.deepEqual(question.options, []);
 		assert.equal(question.allowOther, true);
-		assert.equal(question.min, 2);
-		assert.equal(question.max, 3);
+		assert.equal(question.multiple, false);
+		assert.equal(question.min, undefined);
+		assert.equal(question.max, undefined);
 		assert.equal(question.otherLabel, DEFAULT_OTHER_LABEL);
 	});
 });
@@ -220,10 +221,13 @@ describe("buildResult", () => {
 		assert.equal(result.answers[1]!.skipped, true);
 	});
 
-	it("keeps the cancelled flag", () => {
+	it("keeps the cancelled flag and pending state", () => {
 		const questions = normalizeQuestions({ questions: [{ question: "Only" }] });
-		const result = buildResult(questions, new Map(), true);
-		assert.equal(result.cancelled, true);
+		const cancelled = buildResult(questions, new Map(), true);
+		assert.equal(cancelled.cancelled, true);
+		assert.equal(cancelled.pending, false);
+		const pending = buildResult(questions, new Map(), false, true);
+		assert.equal(pending.pending, true);
 	});
 });
 
@@ -237,6 +241,7 @@ describe("toStructuredOutput", () => {
 		const output = toStructuredOutput({ cancelled: false, answers: [answer] });
 		assert.deepEqual(output, {
 			cancelled: false,
+			pending: false,
 			answers: [
 				{
 					id: "db",

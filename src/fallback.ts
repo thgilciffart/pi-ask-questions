@@ -134,7 +134,7 @@ async function askMultiple(
 			selected.add(index);
 		}
 	});
-	const custom: AnswerEntry[] = [];
+	let custom: AnswerEntry | undefined;
 	const doneLabel = "Done";
 	const customLabel = `${question.otherLabel} (type an answer)`;
 	const skipLabel = "Skip this question";
@@ -168,14 +168,8 @@ async function askMultiple(
 				ui.notify("Type an answer first.", "warning");
 				continue;
 			}
-			if (
-				custom.some((entry) => entry.value === value) ||
-				question.options.some((option) => option.value === value)
-			) {
-				ui.notify("That answer was already added.", "info");
-				continue;
-			}
-			custom.push({ value, label: value, custom: true });
+			// A question holds at most one typed answer; editing replaces it.
+			custom = { value, label: value, custom: true };
 			continue;
 		}
 		if (choice === doneLabel) {
@@ -183,7 +177,7 @@ async function askMultiple(
 				...question.options
 					.filter((_, index) => selected.has(index))
 					.map((option) => ({ value: option.value, label: option.label, custom: false })),
-				...custom,
+				...(custom ? [custom] : []),
 			];
 			const error = answerError(question, makeAnswer(question, entries));
 			if (error) {

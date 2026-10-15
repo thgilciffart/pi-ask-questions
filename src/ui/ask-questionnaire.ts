@@ -5,7 +5,7 @@
  *
  *   ─────────────────────────────────────────────
  *    Title
- *    ✓ Scope  ◐ Style  · Notes  [ Submit ]
+ *    Scope  Release  Notes  [ Submit ]
  *
  *    The question text
  *    Optional header / hints
@@ -13,21 +13,22 @@
  *    ❯ [x] 1. Option label
  *          description
  *      [ ] 2. Another option
- *      ✎ Type something…
- *      ⏭ Skip this question
+ *      Type something…
+ *      (inline editor for the typed answer, no separate menu)
+ *      Skip this question
  *
  *    ↑↓ move • Space toggle • Enter confirm • Esc cancel
  *   ─────────────────────────────────────────────
  *
  * Keyboard contract:
- * - Tab / Shift+Tab (and ←/→) switch tabs.
+ * - Tab / Shift+Tab switch tabs.
  * - ↑/↓ move the cursor; Home/End jump to the first/last row.
  * - Space toggles a multiple-choice option; Enter confirms the question.
  * - 1-9 jumps to an option; on multiple-choice it toggles it.
  * - A selects all options, C clears the selection (multiple-choice only).
- * - Enter on "Type something…" opens the inline editor.
- * - Esc leaves the editor or arms cancellation; Esc twice cancels.
- * - Ctrl+C cancels immediately.
+ * - Moving the cursor onto "Type something…" starts editing immediately;
+ *   the inline editor is always there, no separate menu.
+ * - Esc arms cancellation; Esc twice cancels. Ctrl+C cancels immediately.
  */
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
@@ -110,12 +111,13 @@ export function createQuestionnaireComponent(
 	let tab = 0;
 	let cursor = 0;
 	let submitCursor = questions.length;
-	let mode: "options" | "typing" = "options";
 	let cancelArmed = false;
 	let notice: { text: string; kind: NoticeKind } | undefined;
 	let editorText = "";
 	let cachedLines: string[] | undefined;
 	let finished = false;
+	let componentFocused = false;
+	let suppressEditorEvents = false;
 
 	const answers = new Map<string, QuestionAnswer>();
 
@@ -145,6 +147,10 @@ export function createQuestionnaireComponent(
 		}
 	}
 
+	function currentQuestion(): NormalizedQuestion | undefined {
+		return questions[tab];
+	}
+
 	function rowsFor(question: NormalizedQuestion): QuestionRow[] {
 		const rows: QuestionRow[] = question.options.map((option, index) => ({
 			kind: "option",
@@ -158,6 +164,22 @@ export function createQuestionnaireComponent(
 			rows.push({ kind: "skip" });
 		}
 		return rows;
+	}
+
+	function cursorRow(question: NormalizedQuestion): QuestionRow | undefined {
+		return rowsFor(question)[cursor];
+	}
+
+	/** True when keystrokes belong in the editor (free-form or custom row). */
+	function isEditorActive(): boolean {
+		const question = currentQuestion();
+		if (!question) {
+			return false;
+		}
+		if (question.options.length === 0) {
+			return true;
+		}
+		return cursorRow(question)?.kind === "custom";
 	}
 
 	function isOptionSelected(question: NormalizedQuestion, option: NormalizedOption): boolean {
@@ -192,22 +214,67 @@ export function createQuestionnaireComponent(
 	}
 
 	function setText(text: string): void {
+		suppressEditorEvents = true;
 		editor.setText(text);
 		editorText = editor.getText();
+		suppressEditorEvents = false;
+	}
+
+	function syncEditorFocus(): void {
+		editor.focused = componentFocused && isEditorActive();
+	}
+
+	/**
+	 * Keep answers in sync with the editor while the user types. Free-form
+	 * questions store a single typed answer; option questions with a custom
+	 * row store a single custom entry alongside the selected options.
+	 */
+	function applyEditorText(value: string): void {
+		const question = currentQuestion();
+		if (!question) {
+			return;
+		}
+		const trimmed = value.trim();
+		if (question.options.length === 0) {
+			if (trimmed) {
+				setEntries(question, [{ value: trimmed, label: trimmed, custom: true }]);
+			} else if (question.required) {
+				setEntries(question, []);
+			} else {
+				answers.set(question.id, makeAnswer(question, [], true));
+			}
+			return;
+		}
+		if (cursorRow(question)?.kind !== "custom") {
+			return;
+		}
+		const others = getAnswer(question).entries.filter((entry) => !entry.custom);
+		if (trimmed) {
+			setEntries(question, [...others, { value: trimmed, label: trimmed, custom: true }]);
+		} else {
+			setEntries(question, others);
+		}
 	}
 
 	// ── Navigation ───────────────────────────────────────────────────────
 
-	function prepareQuestion(question: NormalizedQuestion | undefined, prefill: boolean): void {
-		cursor = 0;
-		if (!question || question.options.length > 0) {
-			mode = "options";
+	function setEditorForQuestion(question: NormalizedQuestion | undefined): void {
+		if (!question) {
 			setText("");
 			return;
 		}
-		mode = "typing";
-		const existing = prefill && !question.multiple ? getAnswer(question).entries[0]?.value ?? "" : "";
-		setText(existing);
+		const custom = getAnswer(question).entries.find((entry) => entry.custom);
+		if (question.options.length === 0) {
+			setText(getAnswer(question).entries[0]?.value ?? "");
+		} else {
+			setText(custom?.value ?? "");
+		}
+	}
+
+	function prepareQuestion(question: NormalizedQuestion | undefined): void {
+		cursor = 0;
+		setEditorForQuestion(question);
+		syncEditorFocus();
 	}
 
 	function goTab(delta: number): void {
@@ -221,7 +288,7 @@ export function createQuestionnaireComponent(
 		if (tab === submitTabIndex) {
 			submitCursor = submitTabIndex;
 		}
-		prepareQuestion(questions[tab], true);
+		prepareQuestion(questions[tab]);
 		refresh();
 	}
 
@@ -229,7 +296,7 @@ export function createQuestionnaireComponent(
 		tab = index;
 		cancelArmed = false;
 		notice = undefined;
-		prepareQuestion(questions[tab], true);
+		prepareQuestion(questions[tab]);
 		refresh();
 	}
 
@@ -240,7 +307,7 @@ export function createQuestionnaireComponent(
 			return;
 		}
 		tab = tab < questions.length - 1 ? tab + 1 : submitTabIndex;
-		prepareQuestion(questions[tab], true);
+		prepareQuestion(questions[tab]);
 		refresh();
 	}
 
@@ -257,7 +324,7 @@ export function createQuestionnaireComponent(
 				const index = questions.findIndex((question) => question.id === first.id);
 				tab = index >= 0 ? index : 0;
 				cancelArmed = false;
-				prepareQuestion(questions[tab], false);
+				prepareQuestion(questions[tab]);
 				notice = { text: `${first.label}: ${first.message}`, kind: "error" };
 				refresh();
 				return;
@@ -278,29 +345,24 @@ export function createQuestionnaireComponent(
 		refresh();
 	}
 
-	function startTyping(): void {
-		mode = "typing";
-		const question = questions[tab];
-		const existing = question
-			? getAnswer(question).entries.find((entry) => entry.custom)?.value ?? ""
-			: "";
-		setText(existing);
-		notice = undefined;
-		refresh();
-	}
-
 	function activateRow(toggle: boolean): void {
-		const question = questions[tab];
+		const question = currentQuestion();
 		if (!question) {
 			return;
 		}
-		const rows = rowsFor(question);
-		const row = rows[cursor];
+		const row = cursorRow(question);
 		if (!row) {
 			return;
 		}
 		if (row.kind === "custom") {
-			startTyping();
+			// The custom row is edited in place; Enter confirms the question.
+			const error = answerError(question, answers.get(question.id));
+			if (error) {
+				notice = { text: error, kind: "warning" };
+				refresh();
+				return;
+			}
+			advance();
 			return;
 		}
 		if (row.kind === "skip") {
@@ -338,68 +400,6 @@ export function createQuestionnaireComponent(
 		setEntries(question, [...question.options.slice(0, capacity).map(optionEntry), ...custom]);
 		notice = undefined;
 		refresh();
-	}
-
-	function submitTyped(rawValue: string): void {
-		const question = questions[tab];
-		if (!question) {
-			return;
-		}
-		const value = rawValue.trim();
-		const answer = getAnswer(question);
-
-		if (!value) {
-			if (!question.required) {
-				answers.set(question.id, makeAnswer(question, [], true));
-				advance();
-				return;
-			}
-			if (question.multiple && question.options.length === 0) {
-				if (answer.entries.length > 0) {
-					advance();
-					return;
-				}
-				notice = { text: "Type an answer first.", kind: "warning" };
-				refresh();
-				return;
-			}
-			if (question.multiple) {
-				mode = "options";
-				notice = undefined;
-				refresh();
-				return;
-			}
-			notice = { text: "Type an answer first.", kind: "warning" };
-			refresh();
-			return;
-		}
-
-		if (question.multiple) {
-			if (answer.entries.some((entry) => entry.custom && entry.value === value)) {
-				notice = { text: "That answer was already added.", kind: "info" };
-				refresh();
-				return;
-			}
-			if (question.max !== undefined && answer.entries.length >= question.max) {
-				notice = {
-					text: `Select at most ${question.max} ${question.max === 1 ? "answer" : "answers"}.`,
-					kind: "warning",
-				};
-				refresh();
-				return;
-			}
-			setEntries(question, [...answer.entries, { value, label: value, custom: true }]);
-			notice = { text: `Added "${value}".`, kind: "success" };
-			setText("");
-			if (question.options.length > 0) {
-				mode = "options";
-			}
-			refresh();
-			return;
-		}
-
-		setEntries(question, [{ value, label: value, custom: true }]);
-		advance();
 	}
 
 	// ── Input handling ───────────────────────────────────────────────────
@@ -443,39 +443,67 @@ export function createQuestionnaireComponent(
 		}
 	}
 
+	function moveCursor(delta: number, question: NormalizedQuestion): void {
+		const rows = rowsFor(question);
+		if (rows.length === 0) {
+			return;
+		}
+		cursor = (cursor + delta + rows.length) % rows.length;
+		syncEditorFocus();
+		refresh();
+	}
+
+	function handleCustomRow(data: string, question: NormalizedQuestion): void {
+		if (matchesKey(data, Key.up)) {
+			moveCursor(-1, question);
+			return;
+		}
+		if (matchesKey(data, Key.down)) {
+			moveCursor(1, question);
+			return;
+		}
+		if (matchesKey(data, Key.enter)) {
+			activateRow(false);
+			return;
+		}
+		// Left/right and everything else edit the inline text.
+		editor.handleInput(data);
+		refresh();
+	}
+
 	function handleQuestionTab(data: string): void {
-		const question = questions[tab];
+		const question = currentQuestion();
 		if (!question) {
 			return;
 		}
 		const rows = rowsFor(question);
 
-		if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
+		if (matchesKey(data, Key.right)) {
 			goTab(1);
 			return;
 		}
-		if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
+		if (matchesKey(data, Key.left)) {
 			goTab(-1);
 			return;
 		}
 		if (rows.length > 0) {
 			if (matchesKey(data, Key.up)) {
-				cursor = (cursor - 1 + rows.length) % rows.length;
-				refresh();
+				moveCursor(-1, question);
 				return;
 			}
 			if (matchesKey(data, Key.down)) {
-				cursor = (cursor + 1) % rows.length;
-				refresh();
+				moveCursor(1, question);
 				return;
 			}
 			if (matchesKey(data, Key.home)) {
 				cursor = 0;
+				syncEditorFocus();
 				refresh();
 				return;
 			}
 			if (matchesKey(data, Key.end)) {
 				cursor = rows.length - 1;
+				syncEditorFocus();
 				refresh();
 				return;
 			}
@@ -500,6 +528,7 @@ export function createQuestionnaireComponent(
 		}
 		if (question.multiple && lower === "c") {
 			setEntries(question, []);
+			setText("");
 			notice = undefined;
 			refresh();
 			return;
@@ -509,6 +538,7 @@ export function createQuestionnaireComponent(
 			const index = rows.findIndex((row) => row.kind === "option" && row.index === digit - 1);
 			if (index >= 0) {
 				cursor = index;
+				syncEditorFocus();
 				activateRow(question.multiple);
 			}
 		}
@@ -524,36 +554,6 @@ export function createQuestionnaireComponent(
 		}
 
 		const escape = matchesKey(data, Key.escape);
-
-		if (mode === "typing") {
-			if (showTabs && matchesKey(data, Key.tab)) {
-				goTab(1);
-				return;
-			}
-			if (showTabs && matchesKey(data, Key.shift("tab"))) {
-				goTab(-1);
-				return;
-			}
-			if (escape) {
-				const question = questions[tab];
-				if (question && question.options.length > 0) {
-					mode = "options";
-					notice = undefined;
-					refresh();
-				} else {
-					armCancel();
-				}
-				return;
-			}
-			if (cancelArmed) {
-				cancelArmed = false;
-				notice = undefined;
-			}
-			editor.handleInput(data);
-			refresh();
-			return;
-		}
-
 		if (!escape && cancelArmed) {
 			cancelArmed = false;
 			notice = undefined;
@@ -566,8 +566,31 @@ export function createQuestionnaireComponent(
 			}
 			return;
 		}
+
+		if (showTabs && matchesKey(data, Key.tab)) {
+			goTab(1);
+			return;
+		}
+		if (showTabs && matchesKey(data, Key.shift("tab"))) {
+			goTab(-1);
+			return;
+		}
+
+		const question = currentQuestion();
 		if (showTabs && tab === submitTabIndex) {
 			handleSubmitTab(data);
+			return;
+		}
+		if (!question) {
+			return;
+		}
+		if (question.options.length === 0) {
+			editor.handleInput(data);
+			refresh();
+			return;
+		}
+		if (cursorRow(question)?.kind === "custom") {
+			handleCustomRow(data, question);
 			return;
 		}
 		handleQuestionTab(data);
@@ -580,15 +603,7 @@ export function createQuestionnaireComponent(
 		for (let index = 0; index < questions.length; index += 1) {
 			const question = questions[index]!;
 			const status = answerStatus(question, answers.get(question.id));
-			const icon =
-				status === "complete"
-					? "✓"
-					: status === "partial"
-						? "◐"
-						: status === "skipped"
-							? "·"
-							: "○";
-			const text = ` ${icon} ${question.label} `;
+			const text = ` ${question.label} `;
 			if (index === tab) {
 				parts.push(theme.bg("selectedBg", theme.fg("text", text)));
 			} else if (status === "complete") {
@@ -609,7 +624,7 @@ export function createQuestionnaireComponent(
 		add(" ", parts.join(" "));
 	}
 
-	function renderRows(add: AddLine, question: NormalizedQuestion): void {
+	function renderRows(add: AddLine, lines: string[], renderWidth: number, question: NormalizedQuestion): void {
 		const rows = rowsFor(question);
 		const { start, end, hiddenAbove, hiddenBelow } = windowRange(
 			rows.length,
@@ -617,7 +632,7 @@ export function createQuestionnaireComponent(
 			MAX_VISIBLE_ROWS,
 		);
 		if (hiddenAbove > 0) {
-			add("  ", theme.fg("dim", `↑ ${hiddenAbove} more`));
+			add("  ", theme.fg("dim", `${hiddenAbove} more above`));
 		}
 		for (let index = start; index < end; index += 1) {
 			const row = rows[index]!;
@@ -635,23 +650,29 @@ export function createQuestionnaireComponent(
 				continue;
 			}
 			if (row.kind === "custom") {
-				const customEntries = getAnswer(question).entries.filter((entry) => entry.custom);
-				const suffix = customEntries.length > 0 ? ` (${customEntries.length} added)` : "";
-				add(marker, theme.fg(active ? "accent" : "text", `✎ ${question.otherLabel}${suffix}`));
-				for (const entry of customEntries) {
-					add("     ", theme.fg("success", `✎ "${entry.value}"`));
+				add(marker, theme.fg(active ? "accent" : "text", question.otherLabel));
+				const customValue = getAnswer(question).entries.find((entry) => entry.custom)?.value;
+				if (active) {
+					if (!editorText && question.placeholder) {
+						add("  ", theme.fg("dim", question.placeholder));
+					}
+					for (const line of editor.render(Math.max(1, renderWidth - 2))) {
+						lines.push(`  ${line}`);
+					}
+				} else if (customValue) {
+					add("  ", theme.fg("text", customValue));
 				}
 				continue;
 			}
-			add(marker, theme.fg(active ? "accent" : "warning", "⏭ Skip this question"));
+			add(marker, theme.fg(active ? "accent" : "warning", "Skip this question"));
 		}
 		if (hiddenBelow > 0) {
-			add("  ", theme.fg("dim", `↓ ${hiddenBelow} more`));
+			add("  ", theme.fg("dim", `${hiddenBelow} more below`));
 		}
 	}
 
 	function renderQuestion(add: AddLine, lines: string[], renderWidth: number): void {
-		const question = questions[tab];
+		const question = currentQuestion();
 		if (!question) {
 			return;
 		}
@@ -665,11 +686,16 @@ export function createQuestionnaireComponent(
 			add(" ", theme.fg("dim", `Select ${min}${max} • Space toggles`));
 		}
 		add(" ", "");
-		if (question.options.length === 0 || mode === "typing") {
-			renderTyping(add, lines, renderWidth, question);
-		} else {
-			renderRows(add, question);
+		if (question.options.length === 0) {
+			if (question.placeholder && editorText.length === 0) {
+				add(" ", theme.fg("dim", question.placeholder));
+			}
+			for (const line of editor.render(Math.max(1, renderWidth - 2))) {
+				lines.push(` ${line}`);
+			}
+			return;
 		}
+		renderRows(add, lines, renderWidth, question);
 	}
 
 	function renderSubmit(add: AddLine): void {
@@ -682,13 +708,6 @@ export function createQuestionnaireComponent(
 			const answer = getAnswer(question);
 			const active = submitCursor === index;
 			const marker = active ? theme.fg("accent", "❯ ") : "  ";
-			const status = answerStatus(question, answer);
-			const icon =
-				status === "complete"
-					? theme.fg("success", "✓ ")
-					: status === "partial"
-						? theme.fg("accent", "◐ ")
-						: "";
 			let summary: string;
 			if (answer.skipped) {
 				summary = theme.fg("dim", "(skipped)");
@@ -703,7 +722,7 @@ export function createQuestionnaireComponent(
 					)
 					.join(theme.fg("dim", ", "));
 			}
-			add(marker, `${icon}${theme.fg("muted", `${question.label}: `)}${summary}`);
+			add(marker, `${theme.fg("muted", `${question.label}: `)}${summary}`);
 		}
 		add(" ", "");
 		const ready = errors.length === 0;
@@ -728,19 +747,15 @@ export function createQuestionnaireComponent(
 		if (showTabs && tab === submitTabIndex) {
 			return `↑↓ choose • Enter open or ${options.submitLabel} • Tab switch • Esc cancel`;
 		}
-		const question = questions[tab];
+		const question = currentQuestion();
 		if (!question) {
 			return "Tab switch • Esc cancel";
 		}
-		const typing = mode === "typing" || question.options.length === 0;
-		if (typing) {
-			if (question.options.length === 0 && question.multiple) {
-				return "Enter add • empty Enter finish • Esc cancel";
-			}
-			if (question.options.length > 0) {
-				return "Enter submit • Esc back to options";
-			}
+		if (question.options.length === 0) {
 			return "Enter submit • \\+Enter newline • Esc cancel";
+		}
+		if (cursorRow(question)?.kind === "custom") {
+			return "Type your answer • Enter confirm • ↑↓ move • Tab switch • Esc cancel";
 		}
 		if (question.multiple) {
 			return "↑↓ move • Space toggle • A all • C clear • 1-9 jump • Enter confirm • Tab switch";
@@ -794,29 +809,6 @@ export function createQuestionnaireComponent(
 		return lines;
 	}
 
-	// ── Typing sub-render (declared separately to keep render readable) ──
-
-	function renderTyping(
-		add: AddLine,
-		lines: string[],
-		renderWidth: number,
-		question: NormalizedQuestion,
-	): void {
-		const answer = getAnswer(question);
-		if (question.options.length === 0 && answer.entries.length > 0) {
-			answer.entries.forEach((entry, index) => {
-				add(" ", theme.fg("success", `${index + 1}. ${entry.value}`));
-			});
-			add(" ", "");
-		}
-		if (question.placeholder && editorText.length === 0) {
-			add(" ", theme.fg("dim", question.placeholder));
-		}
-		for (const line of editor.render(Math.max(1, renderWidth - 2))) {
-			lines.push(` ${line}`);
-		}
-	}
-
 	// ── Editor wiring ────────────────────────────────────────────────────
 
 	const editorTheme: EditorTheme = {
@@ -832,13 +824,29 @@ export function createQuestionnaireComponent(
 	const editor = new Editor(tui, editorTheme);
 	editor.onChange = (value) => {
 		editorText = value;
+		if (!suppressEditorEvents) {
+			applyEditorText(value);
+		}
 		cachedLines = undefined;
 	};
 	editor.onSubmit = (value) => {
-		submitTyped(value);
+		const question = currentQuestion();
+		if (!question) {
+			return;
+		}
+		// submitValue() clears the editor and fires onChange("") before calling
+		// onSubmit, so re-apply the submitted text before validating.
+		applyEditorText(value);
+		const error = answerError(question, answers.get(question.id));
+		if (error) {
+			notice = { text: error, kind: "warning" };
+			refresh();
+			return;
+		}
+		advance();
 	};
 
-	prepareQuestion(questions[0], false);
+	prepareQuestion(questions[0]);
 
 	const onAbort = (): void => {
 		finished = true;
@@ -848,10 +856,11 @@ export function createQuestionnaireComponent(
 
 	return {
 		get focused(): boolean {
-			return editor.focused;
+			return componentFocused;
 		},
 		set focused(value: boolean) {
-			editor.focused = value;
+			componentFocused = value;
+			syncEditorFocus();
 		},
 		render,
 		handleInput,

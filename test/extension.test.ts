@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionAPI, ExtensionToolContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { AskResult } from "../src/questions.ts";
 import extension from "../src/extension.ts";
 
 /** Register the extension against a minimal fake API and capture definitions. */
 function loadExtension() {
 	let tool: any;
 	const commands: Array<{ name: string; description?: string }> = [];
+	const messages: Array<{ message: any; options: any }> = [];
 	const pi = {
 		registerTool: (definition: unknown) => {
 			tool = definition;
@@ -14,9 +16,13 @@ function loadExtension() {
 		registerCommand: (name: string, definition: { description?: string }) => {
 			commands.push({ name, description: definition.description });
 		},
+		on: () => () => {},
+		sendMessage: (message: unknown, options?: unknown) => {
+			messages.push({ message, options });
+		},
 	} as unknown as ExtensionAPI;
 	extension(pi);
-	return { tool, commands };
+	return { tool, commands, messages };
 }
 
 const theme = {
@@ -100,6 +106,7 @@ describe("ask_user execution", () => {
 		assert.match(result.content[0].text, /Notes: typed "hello world"/);
 		assert.deepEqual(result.structuredContent, {
 			cancelled: false,
+			pending: false,
 			answers: [
 				{
 					id: "notes",
@@ -131,5 +138,84 @@ describe("ask_user execution", () => {
 		);
 		assert.equal(result.details.cancelled, true);
 		assert.match(result.content[0].text, /cancelled/i);
+	});
+});
+
+describe("ask_user noWait", () => {
+	function tuiContext(): { ctx: ExtensionToolContext; resolve: () => void } {
+		let resolveCustom: ((result: AskResult) => void) | undefined;
+		const ctx = {
+			mode: "tui",
+			hasUI: true,
+			ui: {
+				custom: () =>
+					new Promise<AskResult>((resolve) => {
+						resolveCustom = resolve;
+					}),
+			},
+		} as unknown as ExtensionToolContext;
+		return {
+			ctx,
+			resolve: () => {
+				resolveCustom?.({
+					cancelled: false,
+					answers: [
+						{
+							id: "pick",
+							label: "Pick",
+							question: "Choose",
+							entries: [{ value: "A", label: "A", custom: false }],
+							skipped: false,
+						},
+					],
+				});
+			},
+		};
+	}
+
+	it("returns immediately and delivers the answers as a follow-up message", async () => {
+		const { tool, messages } = loadExtension();
+		const host = tuiContext();
+		const result = await tool.execute(
+			"call-bg",
+			{
+				noWait: true,
+				questions: [
+					{ id: "pick", label: "Pick", question: "Choose", options: [{ label: "A" }] },
+				],
+			},
+			undefined,
+			undefined,
+			host.ctx,
+		);
+		assert.equal(result.isError, undefined);
+		assert.equal(result.details.pending, true);
+		assert.equal(result.structuredContent.pending, true);
+		assert.deepEqual(result.structuredContent.answers, [
+			{ id: "pick", question: "Choose", skipped: false, answers: [] },
+		]);
+		assert.equal(messages.length, 0, "nothing is sent while the question is open");
+
+		host.resolve();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		assert.equal(messages.length, 1);
+		assert.match(messages[0]!.message.content, /Pick: selected "A"/);
+		assert.deepEqual(messages[0]!.options, { triggerTurn: true, deliverAs: "followUp" });
+	});
+
+	it("rejects a second background questionnaire while one is open", async () => {
+		const { tool, messages } = loadExtension();
+		const host = tuiContext();
+		const params = {
+			noWait: true,
+			questions: [{ id: "pick", label: "Pick", question: "Choose", options: [{ label: "A" }] }],
+		};
+		await tool.execute("call-bg-1", params, undefined, undefined, host.ctx);
+		const second = await tool.execute("call-bg-2", params, undefined, undefined, host.ctx);
+		assert.equal(second.isError, true);
+		assert.match(second.content[0].text, /already open/);
+		host.resolve();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		assert.equal(messages.length, 1, "the first questionnaire still delivers");
 	});
 });

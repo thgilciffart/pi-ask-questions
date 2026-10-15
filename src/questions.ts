@@ -50,6 +50,8 @@ export interface QuestionAnswer {
 
 export interface AskResult {
 	cancelled: boolean;
+	/** True when the questionnaire is still open in the background (noWait). */
+	pending?: boolean;
 	answers: QuestionAnswer[];
 }
 
@@ -80,7 +82,9 @@ export function normalizeQuestions(params: AskUserParams): NormalizedQuestion[] 
 			selected: option.selected ?? false,
 		}));
 		const freeForm = options.length === 0;
-		const multiple = raw.multiple ?? false;
+		// Free-form questions always hold exactly one typed answer, so
+		// multiple/min/max do not apply to them.
+		const multiple = freeForm ? false : (raw.multiple ?? false);
 
 		return {
 			id,
@@ -177,9 +181,11 @@ export function buildResult(
 	questions: NormalizedQuestion[],
 	answers: ReadonlyMap<string, QuestionAnswer>,
 	cancelled: boolean,
+	pending = false,
 ): AskResult {
 	return {
 		cancelled,
+		pending,
 		answers: questions.map((question) => {
 			const answer = answers.get(question.id) ?? makeAnswer(question, []);
 			const skipped = answer.skipped || (!question.required && answer.entries.length === 0);
@@ -192,6 +198,7 @@ export function buildResult(
 export function toStructuredOutput(result: AskResult): AskUserOutput {
 	return {
 		cancelled: result.cancelled,
+		pending: result.pending ?? false,
 		answers: result.answers.map((answer) => ({
 			id: answer.id,
 			question: answer.question,

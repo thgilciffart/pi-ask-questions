@@ -35,8 +35,10 @@ function mount(questions: ReturnType<typeof normalizeQuestions>) {
 
 const ENTER = "\r";
 const ESCAPE = "\x1b";
+const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const TAB = "\t";
+const BACKSPACE = "\x7f";
 
 describe("questionnaire component", () => {
 	it("renders the question and options", () => {
@@ -172,22 +174,80 @@ describe("questionnaire component", () => {
 		assert.equal(result()?.answers[0]?.skipped, true);
 	});
 
-	it("adds multiple typed answers before finishing", () => {
+	it("treats free-form questions as a single typed answer", () => {
 		const questions = normalizeQuestions({
-			questions: [{ id: "notes", label: "Notes", question: "List things", multiple: true }],
+			questions: [{ id: "notes", label: "Notes", question: "Say something", multiple: true }],
 		});
 		const { component, result } = mount(questions);
-		for (const character of "one") {
+		for (const character of "hello") {
 			component.handleInput(character);
 		}
 		component.handleInput(ENTER);
+		assert.deepEqual(result()?.answers[0]?.entries, [
+			{ value: "hello", label: "hello", custom: true },
+		]);
+	});
+
+	it("edits a typed answer in place on an option question", () => {
+		const questions = normalizeQuestions({
+			questions: [
+				{
+					id: "pick",
+					label: "Pick",
+					question: "Choose and maybe type",
+					multiple: true,
+					options: [{ label: "Alpha" }, { label: "Beta" }],
+				},
+			],
+		});
+		const { component, result } = mount(questions);
+		// Move onto the custom row: typing starts immediately, no menu to open.
+		component.handleInput(DOWN);
+		component.handleInput(DOWN);
+		const rendered = component.render(80).join("\n");
+		assert.match(rendered, /Alpha/, "options stay visible while typing");
+		assert.match(rendered, /Type something/);
+		for (const character of "first") {
+			component.handleInput(character);
+		}
+		component.handleInput(ENTER);
+		assert.deepEqual(result()?.answers[0]?.entries, [
+			{ value: "first", label: "first", custom: true },
+		]);
+	});
+
+	it("replaces the typed answer and combines it with options", () => {
+		const questions = normalizeQuestions({
+			questions: [
+				{
+					id: "pick",
+					label: "Pick",
+					question: "Choose and maybe type",
+					multiple: true,
+					options: [{ label: "Alpha" }, { label: "Beta" }],
+				},
+			],
+		});
+		const { component, result } = mount(questions);
+		component.handleInput(DOWN);
+		component.handleInput(DOWN);
+		for (const character of "one") {
+			component.handleInput(character);
+		}
+		component.handleInput(UP);
+		component.handleInput(UP);
+		component.handleInput(" ");
+		component.handleInput(DOWN);
+		component.handleInput(DOWN);
+		component.handleInput(BACKSPACE);
+		component.handleInput(BACKSPACE);
+		component.handleInput(BACKSPACE);
 		for (const character of "two") {
 			component.handleInput(character);
 		}
 		component.handleInput(ENTER);
-		component.handleInput(ENTER);
 		assert.deepEqual(result()?.answers[0]?.entries, [
-			{ value: "one", label: "one", custom: true },
+			{ value: "Alpha", label: "Alpha", custom: false },
 			{ value: "two", label: "two", custom: true },
 		]);
 	});
