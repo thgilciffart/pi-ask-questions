@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-15
+
+### Fixed
+
+- A background questionnaire (`noWait: true`) that fails to open now reports the failure to the user with an error notification instead of failing silently. The background slot is still released so later calls can open a new questionnaire.
+
+### Documentation
+
+- Documented the `pending` shape of `structuredContent`: while a background questionnaire is open, each `answers[]` entry is a stub with an empty `answers` array, so consumers must branch on `pending` before reading answers.
+
 ## [0.2.0] - 2026-10-15
 
 ### Changed

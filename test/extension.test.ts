@@ -218,4 +218,38 @@ describe("ask_user noWait", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		assert.equal(messages.length, 1, "the first questionnaire still delivers");
 	});
+
+	it("surfaces a failed background questionnaire and releases the slot", async () => {
+		const { tool, messages } = loadExtension();
+		const notifications: Array<{ message: string; type?: string }> = [];
+		const failingCtx = {
+			mode: "tui",
+			hasUI: true,
+			ui: {
+				custom: () => Promise.reject(new Error("render exploded")),
+				notify: (message: string, type?: string) => {
+					notifications.push({ message, type });
+				},
+			},
+		} as unknown as ExtensionToolContext;
+		const params = {
+			noWait: true,
+			questions: [{ id: "pick", label: "Pick", question: "Choose", options: [{ label: "A" }] }],
+		};
+		const failed = await tool.execute("call-bg-fail", params, undefined, undefined, failingCtx);
+		assert.equal(failed.details.pending, true);
+		assert.equal(messages.length, 0, "a failed questionnaire delivers nothing");
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		assert.equal(notifications.length, 1);
+		assert.match(notifications[0]!.message, /could not show the background questionnaire/);
+		assert.match(notifications[0]!.message, /render exploded/);
+		assert.equal(notifications[0]!.type, "error");
+
+		// The failed slot is released, so a later background call can still open.
+		const host = tuiContext();
+		const retry = await tool.execute("call-bg-retry", params, undefined, undefined, host.ctx);
+		assert.equal(retry.details.pending, true);
+		host.resolve();
+	});
 });

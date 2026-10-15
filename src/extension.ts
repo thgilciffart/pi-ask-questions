@@ -175,8 +175,19 @@ export default function askQuestionsExtension(pi: ExtensionAPI): void {
 							{ triggerTurn: true, deliverAs: "followUp" },
 						);
 					})
-					.catch(() => {
-						// The questionnaire could not be shown; there is nothing to deliver.
+					.catch((error: unknown) => {
+						// The questionnaire could not be shown. The tool result already told
+						// the model it was pending, so surface the failure to the user
+						// instead of leaving everyone waiting for answers that never come.
+						const reason = error instanceof Error ? error.message : String(error);
+						try {
+							ctx.ui.notify(
+								`ask_user could not show the background questionnaire: ${reason}`,
+								"error",
+							);
+						} catch {
+							// Reporting is best-effort; the background slot still clears.
+						}
 					})
 					.finally(() => {
 						if (backgroundController === controller) {

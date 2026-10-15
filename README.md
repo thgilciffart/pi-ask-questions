@@ -132,6 +132,12 @@ Notes: (skipped)
 | `questions[].otherLabel` | string | Custom label for the typed-answer entry. |
 | `noWait` | boolean | Show the questionnaire in the background and return immediately (interactive TUI only). The answers arrive as a follow-up message. Only one background questionnaire can be open at a time. |
 
+### Structured results
+
+`structuredContent` mirrors the answers for codemode scripts: `cancelled`, an optional `pending`, and `answers[]` with `{ id, question, skipped, answers: [{ value, label, custom }] }`.
+
+While a background questionnaire is open, `pending` is `true` and each `answers[]` entry is a stub with an empty `answers` array. Branch on `pending` before reading them; the real answers arrive as a follow-up message.
+
 ### Keyboard reference
 
 | Keys | Action |
