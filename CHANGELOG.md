@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Typing a custom single-choice answer now replaces a preselected option instead of creating an invalid two-answer selection.
+- Selection-limit warnings remain visible when an extra option cannot be selected.
+- Questionnaire rendering recalculates when the terminal width changes.
+
 ## [0.2.1] - 2026-10-15
 
 ### Fixed

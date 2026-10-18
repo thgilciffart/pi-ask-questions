@@ -115,6 +115,7 @@ export function createQuestionnaireComponent(
 	let notice: { text: string; kind: NoticeKind } | undefined;
 	let editorText = "";
 	let cachedLines: string[] | undefined;
+	let cachedWidth: number | undefined;
 	let finished = false;
 	let componentFocused = false;
 	let suppressEditorEvents = false;
@@ -250,7 +251,7 @@ export function createQuestionnaireComponent(
 		}
 		const others = getAnswer(question).entries.filter((entry) => !entry.custom);
 		if (trimmed) {
-			setEntries(question, [...others, { value: trimmed, label: trimmed, custom: true }]);
+			setEntries(question, [...(question.multiple ? others : []), { value: trimmed, label: trimmed, custom: true }]);
 		} else {
 			setEntries(question, others);
 		}
@@ -372,8 +373,8 @@ export function createQuestionnaireComponent(
 		}
 		if (question.multiple) {
 			if (toggle) {
-				setEntries(question, toggleOption(question, row.option));
 				notice = undefined;
+				setEntries(question, toggleOption(question, row.option));
 				refresh();
 				return;
 			}
@@ -764,7 +765,7 @@ export function createQuestionnaireComponent(
 	}
 
 	function render(width: number): string[] {
-		if (cachedLines) {
+		if (cachedLines && cachedWidth === width) {
 			return cachedLines;
 		}
 		const renderWidth = Math.max(1, width);
@@ -806,6 +807,7 @@ export function createQuestionnaireComponent(
 		lines.push(theme.fg("borderAccent", "─".repeat(renderWidth)));
 
 		cachedLines = lines;
+		cachedWidth = width;
 		return lines;
 	}
 

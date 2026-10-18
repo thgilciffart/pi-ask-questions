@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import { visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import { type AskResult, normalizeQuestions } from "../src/questions.ts";
 import { createQuestionnaireComponent } from "../src/ui/ask-questionnaire.ts";
 
@@ -41,6 +41,41 @@ const TAB = "\t";
 const BACKSPACE = "\x7f";
 
 describe("questionnaire component", () => {
+	it("replaces a preselected single choice when typing a custom answer", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose one", options: [{ label: "Default", selected: true }] }],
+		}));
+		component.handleInput(DOWN);
+		for (const character of "custom") component.handleInput(character);
+		component.handleInput(ENTER);
+		assert.equal(result()?.cancelled, false);
+		assert.deepEqual(result()?.answers[0]?.entries, [
+			{ value: "custom", label: "custom", custom: true },
+		]);
+	});
+
+	it("shows a warning when another selection would exceed max", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose one", multiple: true, max: 1,
+				options: [{ label: "Alpha" }, { label: "Beta" }] }],
+		}));
+		component.handleInput("1");
+		component.handleInput("2");
+		assert.match(component.render(80).join("\n"), /Select at most 1 answer/);
+		component.handleInput(ENTER);
+		assert.deepEqual(result()?.answers[0]?.entries.map((entry) => entry.value), ["Alpha"]);
+	});
+
+	it("reflows cached content when the terminal width changes", () => {
+		const { component } = mount(normalizeQuestions({
+			questions: [{ question: "A long question that wraps onto several lines in a narrow terminal" }],
+		}));
+		component.render(100);
+		const narrow = component.render(30);
+		assert.ok(narrow.every((line) => visibleWidth(line) <= 30));
+		assert.equal(visibleWidth(component.render(100)[0]!), 100);
+	});
+
 	it("renders the question and options", () => {
 		const questions = normalizeQuestions({
 			questions: [
