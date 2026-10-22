@@ -55,13 +55,13 @@ export const QuestionSchema = Type.Object({
 	),
 	multiple: Type.Optional(
 		Type.Boolean({
-			description: "Allow multiple selections (default: false).",
+			description: "Allow multiple listed options (default: false). One typed answer can accompany either mode.",
 		}),
 	),
 	allowOther: Type.Optional(
 		Type.Boolean({
 			description:
-				'Show a "Type something…" entry so the user can type a custom answer (default: true).',
+				'Show a "Type something…" entry for one typed answer, alone or alongside selected options (default: true).',
 		}),
 	),
 	required: Type.Optional(

@@ -39,9 +39,9 @@ const TOOL_DESCRIPTION = `Ask the user one or more questions and wait for their 
 The interactive UI supports:
 - Tabs: every question gets its own tab (Tab / Shift+Tab and arrow keys switch).
 - Single-select and multi-select questions (set multiple: true).
-- Free-form typing: a question with no options is a text prompt. Option questions can also hold one typed answer unless allowOther is false, and the answer is edited inline.
+- Free-form typing: a question with no options is a text prompt. Option questions can also hold one typed answer alongside the selected option(s) unless allowOther is false, and the answer is edited inline.
 - Optional questions (required: false) that can be skipped, preselected options (selected: true), and min/max selection counts.
-- Number keys 1-9 jump to options; A selects all; C clears a multi-select.
+- Space or number keys 1-9 select or clear options without submitting; Enter confirms. A selects all; C clears a multi-select.
 - Set noWait: true to open the questionnaire in the background: the tool returns immediately and the answers arrive later as a follow-up message.
 
 Guidelines:

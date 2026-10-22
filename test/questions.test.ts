@@ -117,6 +117,21 @@ describe("answerError", () => {
 		);
 	});
 
+	it("allows one listed option plus one typed answer on a single-choice question", () => {
+		const question = normalize({ question: "Pick", options: [{ label: "A" }, { label: "B" }] });
+		const selected = { value: "A", label: "A", custom: false };
+		const typed = { value: "extra", label: "extra", custom: true };
+		assert.equal(answerError(question, makeAnswer(question, [selected, typed])), null);
+		assert.equal(
+			answerError(question, makeAnswer(question, [selected, { value: "B", label: "B", custom: false }, typed])),
+			"Only one option is allowed.",
+		);
+		assert.equal(
+			answerError(question, makeAnswer(question, [selected, typed, { ...typed, value: "another" }])),
+			"Only one typed answer is allowed.",
+		);
+	});
+
 	it("enforces min and max for multiple-choice questions", () => {
 		const question = normalize({
 			question: "Pick some",
@@ -175,6 +190,14 @@ describe("collectAnswerErrors", () => {
 });
 
 describe("answerStatus", () => {
+	it("marks selections over the maximum as partial", () => {
+		const question = normalize({ question: "Choose", multiple: true, max: 1, options: [{ label: "Alpha" }] });
+		assert.equal(answerStatus(question, makeAnswer(question, [
+			{ value: "Alpha", label: "Alpha", custom: false },
+			{ value: "extra", label: "extra", custom: true },
+		])), "partial");
+	});
+
 	it("distinguishes unanswered, skipped, partial, and complete", () => {
 		const required = normalize({ question: "Pick", options: [{ label: "A" }] });
 		assert.equal(answerStatus(required, undefined), "unanswered");

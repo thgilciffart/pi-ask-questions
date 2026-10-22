@@ -44,23 +44,23 @@ Once installed, run `/ask-demo` to preview the UI, or just let the model call `a
 
 ## Features
 
-- **Tabs** — every question gets a tab, with answered state shown by color (green = answered, accent = partially answered, muted = untouched). Move with `Tab` / `Shift+Tab`.
-- **Single-select** radio options with optional descriptions.
-- **Multi-select** checkboxes (`multiple: true`), including `min` / `max` validation, `A` to select all, and `C` to clear.
-- **Free-form typing** — a question without options is a plain text prompt. Option questions can also hold one typed answer unless `allowOther: false`.
+- **Tabs** — every question gets a tab, with answered state shown by color (green = answered, accent = partially answered, muted = untouched) and a count of questions ready to submit. Move with `Tab` / `Shift+Tab`; each tab remembers your draft, option cursor, and text caret.
+- **Single-select** radio options with optional descriptions. Select an option, add extra text if needed, then confirm with `Enter`.
+- **Multi-select** checkboxes (`multiple: true`), including `min` / `max` validation, a live answer count, `A` to select all, and `C` to clear. Typed answers count toward the selection bounds.
+- **Free-form typing** — a question without options is a plain text prompt. Option questions can also hold one typed answer alongside the selected option(s) unless `allowOther: false`.
 - **Inline editing** — move the cursor onto “Type something…” and type; the editor appears directly under the row with the options still visible. No separate menu, and the answer can be edited again in place.
 - **One typed answer per question** — typed answers are never duplicated; editing replaces the previous text.
 - **Optional questions** (`required: false`) that can be skipped, plus preset answers (`selected: true`) and defaults.
-- **Review tab** — see everything before submitting; jump back to any question to edit it.
+- **Review tab** — see your answers and specific validation errors together before submitting; jump back to any question to edit it.
 - **Validation** — required answers and `min`/`max` selection counts are enforced before submit.
 - **Background mode** — set `noWait: true` and the tool returns immediately while the questionnaire stays open; the answers arrive later as a follow-up message.
 - **Safe cancel** — `Esc` arms cancellation, a second `Esc` or `Ctrl+C` cancels immediately.
-- **Scrollable option lists** — long lists show “n more above / below” indicators.
+- **Scrollable option lists** — long lists show “n more above / below” indicators. Use `PageUp` / `PageDown` to move eight rows at a time.
 - **Structured results** — the tool returns text for the model and a machine-readable `structuredContent` payload for codemode scripts.
 
 ## How the model uses it
 
-`ask_user` accepts one or more questions. A single-select question resolves immediately; everything else flows into tabs and a submit step.
+`ask_user` accepts one or more questions. `Space` or `1`–`9` selects an option without submitting, so you can move to “Type something…” and add text. Select an already selected option again to clear it and keep just the typed answer. `Enter` confirms the answer. A questionnaire with one question then resolves; multiple questions flow into tabs and a review step.
 
 ```json
 {
@@ -124,7 +124,7 @@ Notes: (skipped)
 | `questions[].options[].label` | string | Display label. |
 | `questions[].options[].description` | string | Explanation shown below the label. |
 | `questions[].options[].selected` | boolean | Preselect the option. |
-| `questions[].multiple` | boolean | Allow more than one selection. |
+| `questions[].multiple` | boolean | Allow more than one listed option. A typed answer can accompany either mode. |
 | `questions[].allowOther` | boolean | Show the typed-answer entry. Default `true`. |
 | `questions[].required` | boolean | Require an answer before submit. Default `true`. |
 | `questions[].min` / `max` | integer | Selection bounds for multi-select. |
@@ -144,13 +144,16 @@ While a background questionnaire is open, `pending` is `true` and each `answers[
 | --- | --- |
 | `Tab` / `Shift+Tab` | Switch tabs |
 | `↑` / `↓`, `Home` / `End` | Move the option cursor |
-| `Space` | Toggle a checkbox / select a radio option |
-| `1`–`9` | Jump to an option (toggles it in multi-select) |
+| `PageUp` / `PageDown` | Move a page through the option list |
+| `Space` | Select or clear the highlighted option |
+| `1`–`9` | Select or clear a numbered option, without submitting |
 | `A` / `C` | Select all / clear (multi-select) |
 | `Enter` | Confirm the question, or submit on the review tab |
 | `Esc` | Arm cancel; `Esc` twice cancels |
 | `Ctrl+C` | Cancel immediately |
-| `\` + `Enter` | Newline in a free-form answer |
+| `\` + `Enter` | Newline in a free-form or extra typed answer |
+
+In a multiline extra answer, `↑` / `↓` edits between text lines. Moving up from the first line or down from the last line returns to the option list.
 
 ## Modes
 

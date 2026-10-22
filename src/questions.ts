@@ -128,8 +128,12 @@ export function answerError(
 	if (entries.length === 0) {
 		return question.required ? "This question needs an answer." : null;
 	}
-	if (!question.multiple && entries.length > 1) {
-		return "Only one answer is allowed.";
+	const customCount = entries.filter((entry) => entry.custom).length;
+	if (customCount > 1) {
+		return "Only one typed answer is allowed.";
+	}
+	if (!question.multiple && entries.length - customCount > 1) {
+		return "Only one option is allowed.";
 	}
 	if (question.multiple) {
 		const min = question.min ?? (question.required ? 1 : 0);
@@ -167,7 +171,7 @@ export function answerStatus(
 	if (entries.length === 0) {
 		return question.required ? "unanswered" : "skipped";
 	}
-	if (question.multiple && question.min !== undefined && entries.length < question.min) {
+	if (answerError(question, answer)) {
 		return "partial";
 	}
 	return "complete";

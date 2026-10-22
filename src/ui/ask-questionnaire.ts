@@ -23,8 +23,9 @@
  * Keyboard contract:
  * - Tab / Shift+Tab switch tabs.
  * - ↑/↓ move the cursor; Home/End jump to the first/last row.
- * - Space toggles a multiple-choice option; Enter confirms the question.
- * - 1-9 jumps to an option; on multiple-choice it toggles it.
+ * - PageUp/PageDown move through long option lists.
+ * - Space selects or toggles an option; Enter confirms the question.
+ * - 1-9 jumps to an option and toggles it without confirming the question.
  * - A selects all options, C clears the selection (multiple-choice only).
  * - Moving the cursor onto "Type something…" starts editing immediately;
  *   the inline editor is always there, no separate menu.
@@ -121,6 +122,10 @@ export function createQuestionnaireComponent(
 	let suppressEditorEvents = false;
 
 	const answers = new Map<string, QuestionAnswer>();
+	const editors = new Map<NormalizedQuestion | undefined, Editor>();
+	const cursors = new Map<NormalizedQuestion | undefined, number>();
+	let preparedQuestion: NormalizedQuestion | undefined;
+	let editor: Editor;
 
 	// ── State helpers ────────────────────────────────────────────────────
 
@@ -251,7 +256,7 @@ export function createQuestionnaireComponent(
 		}
 		const others = getAnswer(question).entries.filter((entry) => !entry.custom);
 		if (trimmed) {
-			setEntries(question, [...(question.multiple ? others : []), { value: trimmed, label: trimmed, custom: true }]);
+			setEntries(question, [...others, { value: trimmed, label: trimmed, custom: true }]);
 		} else {
 			setEntries(question, others);
 		}
@@ -273,8 +278,25 @@ export function createQuestionnaireComponent(
 	}
 
 	function prepareQuestion(question: NormalizedQuestion | undefined): void {
-		cursor = 0;
-		setEditorForQuestion(question);
+		if (editor) {
+			cursors.set(preparedQuestion, cursor);
+			editor.focused = false;
+		}
+		let nextEditor = editors.get(question);
+		if (!nextEditor) {
+			nextEditor = createEditor();
+			editors.set(question, nextEditor);
+		}
+		editor = nextEditor;
+		preparedQuestion = question;
+		cursor = cursors.get(question) ?? Math.max(0, question?.options.findIndex((option) => option.selected) ?? 0);
+		// Existing editors own the raw draft, caret, and undo history. Loading
+		// the trimmed answer again would discard spaces and reset the caret.
+		if (!cursors.has(question)) {
+			setEditorForQuestion(question);
+		} else {
+			editorText = editor.getText();
+		}
 		syncEditorFocus();
 	}
 
@@ -303,6 +325,7 @@ export function createQuestionnaireComponent(
 
 	function advance(): void {
 		cancelArmed = false;
+		notice = undefined;
 		if (questions.length === 1) {
 			finish(false);
 			return;
@@ -368,6 +391,7 @@ export function createQuestionnaireComponent(
 		}
 		if (row.kind === "skip") {
 			answers.set(question.id, makeAnswer(question, [], true));
+			setText("");
 			advance();
 			return;
 		}
@@ -387,7 +411,18 @@ export function createQuestionnaireComponent(
 			advance();
 			return;
 		}
-		setEntries(question, [optionEntry(row.option)]);
+		const entries = getAnswer(question).entries;
+		const custom = entries.filter((entry) => entry.custom);
+		if (toggle && isOptionSelected(question, row.option)) {
+			setEntries(question, custom);
+		} else if (toggle || entries.length === 0) {
+			setEntries(question, [optionEntry(row.option), ...custom]);
+		}
+		if (toggle) {
+			notice = undefined;
+			refresh();
+			return;
+		}
 		advance();
 	}
 
@@ -455,19 +490,17 @@ export function createQuestionnaireComponent(
 	}
 
 	function handleCustomRow(data: string, question: NormalizedQuestion): void {
-		if (matchesKey(data, Key.up)) {
+		// Keep single-line row navigation quick, while allowing multiline
+		// answers to use arrow keys within the editor.
+		if (matchesKey(data, Key.up) && editor.getCursor().line === 0) {
 			moveCursor(-1, question);
 			return;
 		}
-		if (matchesKey(data, Key.down)) {
+		if (matchesKey(data, Key.down) && editor.getCursor().line === editor.getLines().length - 1) {
 			moveCursor(1, question);
 			return;
 		}
-		if (matchesKey(data, Key.enter)) {
-			activateRow(false);
-			return;
-		}
-		// Left/right and everything else edit the inline text.
+		// Let the editor handle submission, paste expansion, and newline shortcuts.
 		editor.handleInput(data);
 		refresh();
 	}
@@ -488,6 +521,13 @@ export function createQuestionnaireComponent(
 			return;
 		}
 		if (rows.length > 0) {
+			if (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)) {
+				const delta = matchesKey(data, Key.pageUp) ? -MAX_VISIBLE_ROWS : MAX_VISIBLE_ROWS;
+				cursor = Math.max(0, Math.min(rows.length - 1, cursor + delta));
+				syncEditorFocus();
+				refresh();
+				return;
+			}
 			if (matchesKey(data, Key.up)) {
 				moveCursor(-1, question);
 				return;
@@ -540,7 +580,7 @@ export function createQuestionnaireComponent(
 			if (index >= 0) {
 				cursor = index;
 				syncEditorFocus();
-				activateRow(question.multiple);
+				activateRow(true);
 			}
 		}
 	}
@@ -558,6 +598,7 @@ export function createQuestionnaireComponent(
 		if (!escape && cancelArmed) {
 			cancelArmed = false;
 			notice = undefined;
+			refresh();
 		}
 		if (escape) {
 			if (cancelArmed) {
@@ -623,6 +664,8 @@ export function createQuestionnaireComponent(
 			parts.push(theme.fg(ready ? "success" : "dim", submitText));
 		}
 		add(" ", parts.join(" "));
+		const readyCount = questions.filter((question) => !answerError(question, answers.get(question.id))).length;
+		add(" ", theme.fg("dim", `${readyCount} of ${questions.length} questions ready`));
 	}
 
 	function renderRows(add: AddLine, lines: string[], renderWidth: number, question: NormalizedQuestion): void {
@@ -681,10 +724,15 @@ export function createQuestionnaireComponent(
 		if (question.header) {
 			add(" ", theme.fg("muted", question.header));
 		}
+		if (!question.required) {
+			const hint = question.options.length === 0 ? "leave empty to skip" : "choose Skip this question to skip";
+			add(" ", theme.fg("dim", `Optional • ${hint}`));
+		}
 		if (question.multiple) {
-			const min = question.min !== undefined ? `at least ${question.min}` : "one or more";
+			const min = question.min !== undefined ? `at least ${question.min}` : question.required ? "one or more" : "any number";
 			const max = question.max !== undefined ? `, up to ${question.max}` : "";
-			add(" ", theme.fg("dim", `Select ${min}${max} • Space toggles`));
+			const count = getAnswer(question).entries.length;
+			add(" ", theme.fg("dim", `Select ${min}${max} • ${count} ${count === 1 ? "answer" : "answers"} selected • Space toggles`));
 		}
 		add(" ", "");
 		if (question.options.length === 0) {
@@ -703,7 +751,7 @@ export function createQuestionnaireComponent(
 		add(" ", theme.bold(theme.fg("text", "Review your answers")));
 		add(" ", "");
 		const errors = collectAnswerErrors(questions, answers);
-		const invalid = new Set(errors.map((error) => error.id));
+		const invalid = new Map(errors.map((error) => [error.id, error.message]));
 		for (let index = 0; index < questions.length; index += 1) {
 			const question = questions[index]!;
 			const answer = getAnswer(question);
@@ -712,10 +760,8 @@ export function createQuestionnaireComponent(
 			let summary: string;
 			if (answer.skipped) {
 				summary = theme.fg("dim", "(skipped)");
-			} else if (invalid.has(question.id)) {
-				summary = theme.fg("warning", "needs an answer");
 			} else if (answer.entries.length === 0) {
-				summary = theme.fg("dim", "(optional, skipped)");
+				summary = theme.fg(question.required ? "warning" : "dim", question.required ? "(unanswered)" : "(optional, skipped)");
 			} else {
 				summary = answer.entries
 					.map((entry) =>
@@ -724,6 +770,10 @@ export function createQuestionnaireComponent(
 					.join(theme.fg("dim", ", "));
 			}
 			add(marker, `${theme.fg("muted", `${question.label}: `)}${summary}`);
+			const error = invalid.get(question.id);
+			if (error) {
+				add("    ", theme.fg("warning", error));
+			}
 		}
 		add(" ", "");
 		const ready = errors.length === 0;
@@ -738,7 +788,7 @@ export function createQuestionnaireComponent(
 				"  ",
 				theme.fg(
 					"warning",
-					`${count} ${count === 1 ? "question still needs" : "questions still need"} an answer`,
+					`${count} ${count === 1 ? "question needs" : "questions need"} attention`,
 				),
 			);
 		}
@@ -753,15 +803,15 @@ export function createQuestionnaireComponent(
 			return "Tab switch • Esc cancel";
 		}
 		if (question.options.length === 0) {
-			return "Enter submit • \\+Enter newline • Esc cancel";
+			return `Enter ${showTabs ? "confirm" : "submit"} • \\+Enter newline${showTabs ? " • Tab switch" : ""} • Esc cancel`;
 		}
 		if (cursorRow(question)?.kind === "custom") {
-			return "Type your answer • Enter confirm • ↑↓ move • Tab switch • Esc cancel";
+			return "Type your answer • Enter confirm • \\+Enter newline • ↑↓ edit/move • Esc cancel";
 		}
 		if (question.multiple) {
 			return "↑↓ move • Space toggle • A all • C clear • 1-9 jump • Enter confirm • Tab switch";
 		}
-		return "↑↓ move • Space/Enter select • 1-9 jump • Tab switch • Esc cancel";
+		return "↑↓ move • Space select/clear • 1-9 select/clear • Enter confirm • Tab switch • Esc cancel";
 	}
 
 	function render(width: number): string[] {
@@ -823,46 +873,58 @@ export function createQuestionnaireComponent(
 			noMatch: (text) => theme.fg("warning", text),
 		},
 	};
-	const editor = new Editor(tui, editorTheme);
-	editor.onChange = (value) => {
-		editorText = value;
-		if (!suppressEditorEvents) {
+	function createEditor(): Editor {
+		const questionEditor = new Editor(tui, editorTheme);
+		questionEditor.onChange = (value) => {
+			editorText = value;
+			if (!suppressEditorEvents) {
+				applyEditorText(questionEditor.getExpandedText());
+				const question = currentQuestion();
+				if (question && !answerError(question, answers.get(question.id))) {
+					notice = undefined;
+				}
+			}
+			cachedLines = undefined;
+		};
+		questionEditor.onSubmit = (value) => {
+			const question = currentQuestion();
+			if (!question) {
+				return;
+			}
+			// Submission clears the editor first. Restore the submitted text so a
+			// validation error leaves the answer available for further editing.
+			setText(value);
 			applyEditorText(value);
-		}
-		cachedLines = undefined;
-	};
-	editor.onSubmit = (value) => {
-		const question = currentQuestion();
-		if (!question) {
-			return;
-		}
-		// submitValue() clears the editor and fires onChange("") before calling
-		// onSubmit, so re-apply the submitted text before validating.
-		applyEditorText(value);
-		const error = answerError(question, answers.get(question.id));
-		if (error) {
-			notice = { text: error, kind: "warning" };
-			refresh();
-			return;
-		}
-		advance();
-	};
+			const error = answerError(question, answers.get(question.id));
+			if (error) {
+				notice = { text: error, kind: "warning" };
+				refresh();
+				return;
+			}
+			advance();
+		};
+		return questionEditor;
+	}
 
 	prepareQuestion(questions[0]);
 
-	const onAbort = (): void => {
-		finished = true;
-		done(buildResult(questions, answers, true));
-	};
+	const onAbort = (): void => finish(true);
 	options.signal?.addEventListener("abort", onAbort, { once: true });
+	if (options.signal?.aborted) {
+		onAbort();
+	}
 
 	return {
 		get focused(): boolean {
 			return componentFocused;
 		},
 		set focused(value: boolean) {
+			if (componentFocused === value) {
+				return;
+			}
 			componentFocused = value;
 			syncEditorFocus();
+			refresh();
 		},
 		render,
 		handleInput,
@@ -870,6 +932,8 @@ export function createQuestionnaireComponent(
 			cachedLines = undefined;
 		},
 		dispose: () => {
+			finished = true;
+			editor.focused = false;
 			options.signal?.removeEventListener("abort", onAbort);
 		},
 	};

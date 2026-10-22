@@ -38,10 +38,11 @@ const ESCAPE = "\x1b";
 const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const TAB = "\t";
+const SHIFT_TAB = "\x1b[Z";
 const BACKSPACE = "\x7f";
 
 describe("questionnaire component", () => {
-	it("replaces a preselected single choice when typing a custom answer", () => {
+	it("keeps a preselected single choice when adding a typed answer", () => {
 		const { component, result } = mount(normalizeQuestions({
 			questions: [{ question: "Choose one", options: [{ label: "Default", selected: true }] }],
 		}));
@@ -50,7 +51,22 @@ describe("questionnaire component", () => {
 		component.handleInput(ENTER);
 		assert.equal(result()?.cancelled, false);
 		assert.deepEqual(result()?.answers[0]?.entries, [
+			{ value: "Default", label: "Default", custom: false },
 			{ value: "custom", label: "custom", custom: true },
+		]);
+	});
+
+	it("clears a preset single selection without losing the typed answer", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose or type", options: [{ label: "Default", selected: true }] }],
+		}));
+		component.handleInput(DOWN);
+		for (const character of "custom only") component.handleInput(character);
+		component.handleInput(UP);
+		component.handleInput(" ");
+		component.handleInput(ENTER);
+		assert.deepEqual(result()?.answers[0]?.entries, [
+			{ value: "custom only", label: "custom only", custom: true },
 		]);
 	});
 
@@ -95,7 +111,7 @@ describe("questionnaire component", () => {
 		assert.match(rendered, /Type something/);
 	});
 
-	it("finalizes a single-select question on space", () => {
+	it("selects a single option on space and waits for Enter to confirm", () => {
 		const questions = normalizeQuestions({
 			questions: [
 				{
@@ -108,9 +124,63 @@ describe("questionnaire component", () => {
 		});
 		const { component, result } = mount(questions);
 		component.handleInput(" ");
+		assert.equal(result(), undefined, "selection leaves time to add a typed answer");
+		assert.match(component.render(80).join("\n"), /\(•\) 1\. Alpha/);
+		component.handleInput(ENTER);
 		assert.equal(result()?.cancelled, false);
 		assert.deepEqual(result()?.answers[0]?.entries, [
 			{ value: "Alpha", label: "Alpha", custom: false },
+		]);
+	});
+
+	it("keeps one radio selection alongside an editable extra answer", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose and type", options: [{ label: "Alpha" }, { label: "Beta" }] }],
+		}));
+		component.handleInput("1");
+		assert.equal(result(), undefined);
+		component.handleInput(DOWN);
+		component.handleInput(DOWN);
+		for (const character of "extra") component.handleInput(character);
+		component.handleInput(UP);
+		component.handleInput(" ");
+		component.handleInput(DOWN);
+		component.handleInput(BACKSPACE);
+		component.handleInput("!");
+		component.handleInput(ENTER);
+		assert.deepEqual(result()?.answers[0]?.entries, [
+			{ value: "Beta", label: "Beta", custom: false },
+			{ value: "extr!", label: "extr!", custom: true },
+		]);
+	});
+
+	it("isolates undo history between questions", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "First" }, { question: "Second", required: false }],
+		}));
+		for (const character of "first answer") component.handleInput(character);
+		component.handleInput(TAB);
+		component.handleInput("\x1b[45;5u"); // Ctrl+-: editor undo
+		component.handleInput(ENTER);
+		component.handleInput(ENTER);
+		assert.equal(result()?.answers[0]?.entries[0]?.value, "first answer");
+		assert.equal(result()?.answers[1]?.skipped, true);
+		assert.deepEqual(result()?.answers[1]?.entries, []);
+	});
+
+	it("confirms the selected radio option without replacing it with the cursor row", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose and type", options: [{ label: "Alpha" }, { label: "Beta" }] }],
+		}));
+		component.handleInput(" ");
+		component.handleInput(DOWN);
+		component.handleInput(DOWN);
+		for (const character of "extra") component.handleInput(character);
+		component.handleInput(UP);
+		component.handleInput(ENTER);
+		assert.deepEqual(result()?.answers[0]?.entries, [
+			{ value: "Alpha", label: "Alpha", custom: false },
+			{ value: "extra", label: "extra", custom: true },
 		]);
 	});
 
@@ -287,6 +357,70 @@ describe("questionnaire component", () => {
 		]);
 	});
 
+	it("keeps the full pasted custom answer alongside selected options", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose and type", multiple: true, options: [{ label: "Alpha" }] }],
+		}));
+		const text = "x".repeat(1001);
+		component.handleInput(" ");
+		component.handleInput(DOWN);
+		component.handleInput(`\x1b[200~${text}\x1b[201~`);
+		component.handleInput(ENTER);
+		assert.deepEqual(result()?.answers[0]?.entries, [
+			{ value: "Alpha", label: "Alpha", custom: false },
+			{ value: text, label: text, custom: true },
+		]);
+	});
+
+	it("keeps expanded pasted answers when submitting through the review tab", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [
+				{ question: "Type a note" },
+				{ question: "Choose and type", multiple: true, options: [{ label: "Alpha" }] },
+			],
+		}));
+		const text = Array.from({ length: 12 }, (_, index) => `Line ${index}`).join("\n");
+		component.handleInput(`\x1b[200~${text}\x1b[201~`);
+		component.handleInput(TAB);
+		component.handleInput(" ");
+		component.handleInput(DOWN);
+		component.handleInput(`\x1b[200~${text}\x1b[201~`);
+		component.handleInput(TAB);
+		component.handleInput(ENTER);
+		assert.equal(result()?.answers[0]?.entries[0]?.value, text);
+		assert.equal(result()?.answers[1]?.entries[1]?.value, text);
+	});
+
+	it("inserts a newline in a custom answer with backslash Enter", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose or type", options: [{ label: "Alpha" }] }],
+		}));
+		component.handleInput(DOWN);
+		for (const character of "first\\") component.handleInput(character);
+		component.handleInput(ENTER);
+		assert.equal(result(), undefined, "newline must not submit the question");
+		for (const character of "second") component.handleInput(character);
+		component.handleInput(ENTER);
+		assert.equal(result()?.answers[0]?.entries[0]?.value, "first\nsecond");
+	});
+
+	it("keeps a custom answer editable after validation fails", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose two", multiple: true, min: 2, options: [{ label: "Alpha" }] }],
+		}));
+		component.handleInput(DOWN);
+		for (const character of "custom") component.handleInput(character);
+		component.handleInput(ENTER);
+		assert.equal(result(), undefined);
+		assert.match(component.render(80).join("\n"), /Select at least 2 answers/);
+		component.handleInput(BACKSPACE);
+		component.handleInput("!");
+		component.handleInput(UP);
+		component.handleInput(" ");
+		component.handleInput(ENTER);
+		assert.equal(result()?.answers[0]?.entries.find((entry) => entry.custom)?.value, "custo!");
+	});
+
 	it("arms cancellation on the first Escape and cancels on the second", () => {
 		const questions = normalizeQuestions({
 			questions: [{ id: "pick", label: "Pick", question: "Choose one", options: [{ label: "A" }] }],
@@ -312,6 +446,149 @@ describe("questionnaire component", () => {
 		assert.match(component.render(80).join("\n"), /Second question/);
 		component.handleInput(TAB);
 		assert.match(component.render(80).join("\n"), /Review your answers/);
+	});
+
+	it("restores the custom row and unfinished spaces after switching tabs", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [
+				{ question: "Choose and type", options: [{ label: "Alpha" }] },
+				{ question: "Optional note", required: false },
+			],
+		}));
+		component.handleInput(" ");
+		component.handleInput(DOWN);
+		for (const character of "hello ") component.handleInput(character);
+		component.handleInput(TAB);
+		component.handleInput(SHIFT_TAB);
+		for (const character of "world") component.handleInput(character);
+		component.handleInput(ENTER);
+		component.handleInput(ENTER);
+		component.handleInput(ENTER);
+		assert.equal(result()?.answers[0]?.entries[1]?.value, "hello world");
+	});
+
+	it("restores the text caret after switching tabs", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Note" }, { question: "Another note", required: false }],
+		}));
+		for (const character of "hello world") component.handleInput(character);
+		for (let index = 0; index < 5; index += 1) component.handleInput("\x1b[D");
+		component.handleInput(TAB);
+		component.handleInput(SHIFT_TAB);
+		for (const character of "small ") component.handleInput(character);
+		component.handleInput(ENTER);
+		component.handleInput(ENTER);
+		component.handleInput(ENTER);
+		assert.equal(result()?.answers[0]?.entries[0]?.value, "hello small world");
+	});
+
+	it("edits multiline custom answers with arrow keys before leaving the editor", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose or type", options: [{ label: "Alpha" }] }],
+		}));
+		component.handleInput(DOWN);
+		component.handleInput("\x1b[200~first\nsecond\x1b[201~");
+		component.handleInput(UP);
+		component.handleInput("\x1b[H");
+		component.handleInput("[");
+		component.handleInput(DOWN);
+		component.handleInput("\x1b[F");
+		component.handleInput("]");
+		component.handleInput(ENTER);
+		assert.equal(result()?.answers[0]?.entries[0]?.value, "[first\nsecond]");
+	});
+
+	it("pages through long option lists and keeps the target visible", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [{ question: "Choose", allowOther: false,
+				options: Array.from({ length: 20 }, (_, index) => ({ label: `Option ${index + 1}` })) }],
+		}));
+		component.handleInput("\x1b[6~");
+		component.handleInput("\x1b[6~");
+		assert.match(component.render(80).join("\n"), /Option 17/);
+		component.handleInput("\x1b[5~");
+		component.handleInput(ENTER);
+		assert.equal(result()?.answers[0]?.entries[0]?.value, "Option 9");
+	});
+
+	it("shows progress, selection counts, and specific errors without hiding answers", () => {
+		const { component } = mount(normalizeQuestions({
+			questions: [
+				{ question: "Choose two", multiple: true, min: 2, options: [{ label: "Alpha" }, { label: "Beta" }] },
+				{ question: "Optional note", required: false },
+			],
+		}));
+		component.handleInput(" ");
+		assert.match(component.render(80).join("\n"), /1 answer selected/);
+		assert.match(component.render(80).join("\n"), /1 of 2 questions ready/);
+		component.handleInput(TAB);
+		assert.match(component.render(80).join("\n"), /Optional • leave empty to skip/);
+		component.handleInput(TAB);
+		const review = component.render(80).join("\n");
+		assert.match(review, /Alpha/);
+		assert.match(review, /Select at least 2 answers/);
+		assert.match(review, /1 question needs attention/);
+	});
+
+	it("clears validation feedback when the typed answer becomes valid", () => {
+		const { component } = mount(normalizeQuestions({ questions: [{ question: "Type a note" }] }));
+		component.handleInput(ENTER);
+		assert.match(component.render(80).join("\n"), /This question needs an answer/);
+		component.handleInput("x");
+		assert.doesNotMatch(component.render(80).join("\n"), /This question needs an answer/);
+	});
+
+	it("does not carry a validation warning onto the next question", () => {
+		const { component } = mount(normalizeQuestions({
+			questions: [
+				{ question: "Choose", multiple: true, max: 1, options: [{ label: "Alpha" }, { label: "Beta" }] },
+				{ question: "Note" },
+			],
+		}));
+		component.handleInput("1");
+		component.handleInput("2");
+		component.handleInput(ENTER);
+		assert.doesNotMatch(component.render(80).join("\n"), /Select at most 1 answer/);
+	});
+
+	it("does not restore a discarded draft after skipping a question", () => {
+		const { component, result } = mount(normalizeQuestions({
+			questions: [
+				{ question: "Choose or skip", required: false, options: [{ label: "Alpha" }] },
+				{ question: "Note", required: false },
+			],
+		}));
+		component.handleInput(DOWN);
+		for (const character of "discard") component.handleInput(character);
+		component.handleInput(DOWN);
+		component.handleInput(ENTER);
+		component.handleInput(SHIFT_TAB);
+		component.handleInput(UP);
+		for (const character of "fresh") component.handleInput(character);
+		component.handleInput(ENTER);
+		component.handleInput(ENTER);
+		component.handleInput(ENTER);
+		assert.equal(result()?.answers[0]?.entries[0]?.value, "fresh");
+	});
+
+	it("handles an already aborted signal and ignores input after disposal", () => {
+		const { tui, theme } = makeHost();
+		const questions = normalizeQuestions({ questions: [{ question: "Note" }] });
+		const controller = new AbortController();
+		controller.abort();
+		const results: AskResult[] = [];
+		const component = createQuestionnaireComponent(tui, theme, questions,
+			{ submitLabel: "Submit", signal: controller.signal }, (result) => { results.push(result); });
+		assert.equal(results.length, 1);
+		assert.equal(results[0]?.cancelled, true);
+		component.handleInput("x");
+		component.handleInput(ENTER);
+		assert.equal(results.length, 1);
+		const mounted = mount(questions);
+		mounted.component.dispose();
+		mounted.component.handleInput("x");
+		mounted.component.handleInput(ENTER);
+		assert.equal(mounted.result(), undefined);
 	});
 
 	it("cancels through the abort signal", () => {

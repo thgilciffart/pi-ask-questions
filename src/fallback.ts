@@ -33,10 +33,8 @@ export async function runFallbackSurvey(
 		let answered: boolean;
 		if (question.options.length === 0) {
 			answered = await askFreeForm(ui, question, answers, dialogOptions);
-		} else if (question.multiple) {
-			answered = await askMultiple(ui, question, answers, dialogOptions);
 		} else {
-			answered = await askSingle(ui, question, answers, dialogOptions);
+			answered = await askOptions(ui, question, answers, dialogOptions);
 		}
 		if (!answered) {
 			return done(true);
@@ -72,57 +70,7 @@ async function askFreeForm(
 	}
 }
 
-async function askSingle(
-	ui: FallbackUI,
-	question: NormalizedQuestion,
-	answers: Map<string, QuestionAnswer>,
-	options: DialogOptions,
-): Promise<boolean> {
-	const customLabel = `${question.otherLabel} (type an answer)`;
-	const skipLabel = "Skip this question";
-	while (true) {
-		const optionLabels = question.options.map((option, index) => `${index + 1}. ${option.label}`);
-		const choices = [...optionLabels];
-		if (question.allowOther) {
-			choices.push(customLabel);
-		}
-		if (!question.required) {
-			choices.push(skipLabel);
-		}
-		const choice = await ui.select(question.question, choices, options);
-		if (choice === undefined) {
-			return false;
-		}
-		if (choice === skipLabel) {
-			answers.set(question.id, makeAnswer(question, [], true));
-			return true;
-		}
-		if (choice === customLabel) {
-			const typed = await ui.input(question.question, question.placeholder ?? "", options);
-			if (typed === undefined) {
-				return false;
-			}
-			const value = typed.trim();
-			if (value.length === 0) {
-				ui.notify("Type an answer first.", "warning");
-				continue;
-			}
-			answers.set(question.id, makeAnswer(question, [{ value, label: value, custom: true }]));
-			return true;
-		}
-		const index = choices.indexOf(choice);
-		if (index >= 0 && index < question.options.length) {
-			const option = question.options[index]!;
-			answers.set(
-				question.id,
-				makeAnswer(question, [{ value: option.value, label: option.label, custom: false }]),
-			);
-			return true;
-		}
-	}
-}
-
-async function askMultiple(
+async function askOptions(
 	ui: FallbackUI,
 	question: NormalizedQuestion,
 	answers: Map<string, QuestionAnswer>,
@@ -130,7 +78,7 @@ async function askMultiple(
 ): Promise<boolean> {
 	const selected = new Set<number>();
 	question.options.forEach((option, index) => {
-		if (option.selected) {
+		if (option.selected && (question.multiple || selected.size === 0)) {
 			selected.add(index);
 		}
 	});
@@ -140,9 +88,12 @@ async function askMultiple(
 	const skipLabel = "Skip this question";
 
 	while (true) {
-		const optionLabels = question.options.map(
-			(option, index) => `${selected.has(index) ? "[x]" : "[ ]"} ${index + 1}. ${option.label}`,
-		);
+		const optionLabels = question.options.map((option, index) => {
+			const marker = question.multiple
+				? (selected.has(index) ? "[x]" : "[ ]")
+				: (selected.has(index) ? "(•)" : "( )");
+			return `${marker} ${index + 1}. ${option.label}`;
+		});
 		const choices = [...optionLabels, doneLabel];
 		if (question.allowOther) {
 			choices.push(customLabel);
@@ -164,12 +115,9 @@ async function askMultiple(
 				return false;
 			}
 			const value = typed.trim();
-			if (value.length === 0) {
-				ui.notify("Type an answer first.", "warning");
-				continue;
-			}
-			// A question holds at most one typed answer; editing replaces it.
-			custom = { value, label: value, custom: true };
+			// A question holds at most one typed answer; editing replaces it,
+			// and clearing it preserves the listed selection.
+			custom = value ? { value, label: value, custom: true } : undefined;
 			continue;
 		}
 		if (choice === doneLabel) {
@@ -184,12 +132,18 @@ async function askMultiple(
 				ui.notify(error, "warning");
 				continue;
 			}
-			answers.set(question.id, makeAnswer(question, entries));
+			answers.set(question.id, makeAnswer(question, entries, !question.required && entries.length === 0));
 			return true;
 		}
 		const index = choices.indexOf(choice);
 		if (index >= 0 && index < question.options.length) {
-			if (selected.has(index)) {
+			if (!question.multiple) {
+				const wasSelected = selected.has(index);
+				selected.clear();
+				if (!wasSelected) {
+					selected.add(index);
+				}
+			} else if (selected.has(index)) {
 				selected.delete(index);
 			} else {
 				selected.add(index);

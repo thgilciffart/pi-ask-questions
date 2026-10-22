@@ -7,9 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Tabs preserve unfinished drafts, caret positions, and option cursors when revisiting questions.
+- Multiline extra answers support arrow-key editing between lines; PageUp and PageDown navigate long option lists.
+- Questionnaires show progress, live selection counts, and optional-question hints. The review tab preserves answer summaries while displaying specific validation errors.
+
 ### Fixed
 
-- Typing a custom single-choice answer now replaces a preselected option instead of creating an invalid two-answer selection.
+- Invalid selections above the maximum are shown as partially answered instead of complete.
+- Validation feedback clears as answers become valid and does not carry over to the next question.
+- Cancellation handles signals aborted before component creation, and disposed components ignore late input.
+- Selecting a single-choice option with Space or a number key now waits for Enter, allowing an extra typed answer alongside the selected option. Confirming preserves the selection even after moving the cursor.
+- Selecting an already selected single-choice option clears it while preserving the typed answer, so presets can be replaced with text alone.
+- Large pasted answers retain their full text instead of returning an editor paste marker, including when submitted through the review tab.
+- Extra typed answers support backslash + Enter for newlines and remain editable after a validation error.
+- Editor undo history is isolated per question so Undo cannot copy an answer from another question.
+- RPC option dialogs support selecting an option and adding text before choosing Done.
 - Selection-limit warnings remain visible when an extra option cannot be selected.
 - Questionnaire rendering recalculates when the terminal width changes.
 
