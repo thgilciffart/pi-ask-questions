@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added explicit `mode: "urgent"` (blocking) and `mode: "background"` (default) choices. `noWait` remains a compatibility alias; an explicit mode takes precedence.
+- Background answers now use steering delivery at the next model/tool boundary instead of waiting in the follow-up queue.
+
 - Tabs preserve unfinished drafts, caret positions, and option cursors when revisiting questions.
 - Multiline extra answers support arrow-key editing between lines; PageUp and PageDown navigate long option lists.
 - Questionnaires show progress, live selection counts, and optional-question hints. The review tab preserves answer summaries while displaying specific validation errors.

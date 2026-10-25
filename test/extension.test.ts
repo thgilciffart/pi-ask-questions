@@ -141,7 +141,7 @@ describe("ask_user execution", () => {
 	});
 });
 
-describe("ask_user noWait", () => {
+describe("ask_user modes", () => {
 	function tuiContext(): { ctx: ExtensionToolContext; resolve: () => void } {
 		let resolveCustom: ((result: AskResult) => void) | undefined;
 		const ctx = {
@@ -173,35 +173,61 @@ describe("ask_user noWait", () => {
 		};
 	}
 
-	it("returns immediately and delivers the answers as a follow-up message", async () => {
-		const { tool, messages } = loadExtension();
-		const host = tuiContext();
-		const result = await tool.execute(
-			"call-bg",
-			{
-				noWait: true,
-				questions: [
-					{ id: "pick", label: "Pick", question: "Choose", options: [{ label: "A" }] },
-				],
-			},
-			undefined,
-			undefined,
-			host.ctx,
-		);
-		assert.equal(result.isError, undefined);
-		assert.equal(result.details.pending, true);
-		assert.equal(result.structuredContent.pending, true);
-		assert.deepEqual(result.structuredContent.answers, [
-			{ id: "pick", question: "Choose", skipped: false, answers: [] },
-		]);
-		assert.equal(messages.length, 0, "nothing is sent while the question is open");
+	for (const modeParams of [{}, { mode: "background" }, { noWait: true }, { mode: "background", noWait: false }]) {
+		it(`returns immediately and steers with answers for ${JSON.stringify(modeParams)}`, async () => {
+			const { tool, messages } = loadExtension();
+			const host = tuiContext();
+			const result = await tool.execute(
+				"call-bg",
+				{
+					...modeParams,
+					questions: [
+						{ id: "pick", label: "Pick", question: "Choose", options: [{ label: "A" }] },
+					],
+				},
+				undefined,
+				undefined,
+				host.ctx,
+			);
+			assert.equal(result.isError, undefined);
+			assert.equal(result.details.pending, true);
+			assert.equal(result.structuredContent.pending, true);
+			assert.deepEqual(result.structuredContent.answers, [
+				{ id: "pick", question: "Choose", skipped: false, answers: [] },
+			]);
+			assert.equal(messages.length, 0, "nothing is sent while the question is open");
 
-		host.resolve();
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		assert.equal(messages.length, 1);
-		assert.match(messages[0]!.message.content, /Pick: selected "A"/);
-		assert.deepEqual(messages[0]!.options, { triggerTurn: true, deliverAs: "followUp" });
-	});
+			host.resolve();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			assert.equal(messages.length, 1);
+			assert.match(messages[0]!.message.content, /Pick: selected "A"/);
+			assert.deepEqual(messages[0]!.options, { triggerTurn: true, deliverAs: "steer" });
+		});
+
+	}
+
+	for (const modeParams of [{ mode: "urgent" }, { noWait: false }, { mode: "urgent", noWait: true }]) {
+		it(`blocks until the user answers for ${JSON.stringify(modeParams)}`, async () => {
+			const { tool, messages } = loadExtension();
+			const host = tuiContext();
+			let completed = false;
+			const execution = tool.execute("call-urgent", {
+				...modeParams,
+				questions: [{ id: "pick", label: "Pick", question: "Choose", options: [{ label: "A" }] }],
+			}, undefined, undefined, host.ctx).then((result: any) => {
+				completed = true;
+				return result;
+			});
+			await new Promise((resolve) => setImmediate(resolve));
+			assert.equal(completed, false, "tool must remain blocked while input is pending");
+			host.resolve();
+			const result = await execution;
+			assert.equal(result.details.cancelled, false);
+			assert.equal(result.structuredContent.pending, false);
+			assert.match(result.content[0].text, /Pick: selected "A"/);
+			assert.equal(messages.length, 0, "urgent answers are returned directly");
+		});
+	}
 
 	it("rejects a second background questionnaire while one is open", async () => {
 		const { tool, messages } = loadExtension();

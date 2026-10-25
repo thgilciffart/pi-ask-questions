@@ -111,10 +111,16 @@ export const AskUserParamsSchema = Type.Object({
 		description:
 			"Questions to ask, in order. Each question gets its own tab; the user can move between tabs freely.",
 	}),
+	mode: Type.Optional(
+		Type.Union([Type.Literal("urgent"), Type.Literal("background")], {
+			description:
+				'"urgent" blocks further work until the questionnaire is answered or cancelled. "background" (default) returns immediately and injects answers as steering at the next model/tool boundary (interactive TUI only; other interactive modes wait). Takes precedence over noWait. Only one background questionnaire can be open at a time.',
+		}),
+	),
 	noWait: Type.Optional(
 		Type.Boolean({
 			description:
-				"Show the questionnaire in the background and return immediately instead of waiting for the user (interactive TUI only). The answers arrive later as a follow-up message. Useful when the answers are not needed right now. Only one background questionnaire can be open at a time.",
+				"Compatibility alias: true selects background mode, false selects urgent mode. Prefer mode; an explicit mode takes precedence.",
 		}),
 	),
 });
@@ -126,7 +132,7 @@ export const AskUserOutputSchema = Type.Object({
 	pending: Type.Optional(
 		Type.Boolean({
 			description:
-				"True when the questionnaire is still open in the background (noWait); answers arrive in a follow-up message.",
+				"True when the questionnaire is still open in background mode; answers arrive as a steering message.",
 		}),
 	),
 	answers: Type.Array(

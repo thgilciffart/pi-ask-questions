@@ -28,13 +28,13 @@ import { runQuestionnaire, type QuestionnaireContext } from "./ui/ask-questionna
 /** Structured details stored with the tool result for rendering. */
 export interface AskToolDetails {
 	cancelled: boolean;
-	/** True while a noWait questionnaire is still open in the background. */
+	/** True while a background questionnaire is still open. */
 	pending?: boolean;
 	answers: QuestionAnswer[];
 	questions: NormalizedQuestion[];
 }
 
-const TOOL_DESCRIPTION = `Ask the user one or more questions and wait for their answers. Use it when you need a decision, preference, or piece of information that only the user can provide.
+const TOOL_DESCRIPTION = `Ask the user one or more questions, either blocking for answers or continuing in the background. Use it when you need a decision, preference, or piece of information that only the user can provide.
 
 The interactive UI supports:
 - Tabs: every question gets its own tab (Tab / Shift+Tab and arrow keys switch).
@@ -42,14 +42,16 @@ The interactive UI supports:
 - Free-form typing: a question with no options is a text prompt. Option questions can also hold one typed answer alongside the selected option(s) unless allowOther is false, and the answer is edited inline.
 - Optional questions (required: false) that can be skipped, preselected options (selected: true), and min/max selection counts.
 - Space or number keys 1-9 select or clear options without submitting; Enter confirms. A selects all; C clears a multi-select.
-- Set noWait: true to open the questionnaire in the background: the tool returns immediately and the answers arrive later as a follow-up message.
+- Set mode: "urgent" to wait for the user before proceeding with any further work.
+- Use mode: "background" (default) to continue independent work while the questionnaire stays open. Answers are injected as steering at the next model/tool boundary, before further work; they do not wait until the agent finishes. This does not abort an in-flight response or running tool.
+- noWait is a compatibility alias: true means background, false means urgent. An explicit mode takes precedence.
 
 Guidelines:
 - Prefer this tool over asking questions in prose when you actually need the answer to proceed.
 - Group related questions into one call (2-6 questions) instead of asking repeatedly.
 - Provide concrete, labeled options whenever you can; use a free-form question only when the answer space is open.
 - Put recommended options first.
-- Use noWait only when you can keep working without the answer; otherwise omit it so the answers arrive in the same turn.`;
+- Choose urgent when an answer is required before any further work; choose background only when you can continue independent work. In non-TUI interactive modes, background falls back to waiting for answers.`;
 
 const HELP_TEXT = `Interactive UI is not available in this mode. Ask the user the following questions directly in your reply instead:
 {{questions}}`;
@@ -92,8 +94,8 @@ function resultContent(result: AskResult): string {
 
 /** Start the questionnaire and wait for the user. */
 export default function askQuestionsExtension(pi: ExtensionAPI): void {
-	// A noWait questionnaire stays open after its tool call returns. It owns a
-	// session-scoped abort controller and reports its answers with a follow-up
+	// A background questionnaire stays open after its tool call returns. It owns a
+	// session-scoped abort controller and reports its answers with a steering
 	// message instead of a tool result.
 	let backgroundController: AbortController | undefined;
 	let shuttingDown = false;
@@ -116,7 +118,7 @@ export default function askQuestionsExtension(pi: ExtensionAPI): void {
 		promptGuidelines: [
 			"Use ask_user when you need a decision or missing detail from the user; batch related questions into one call instead of asking repeatedly.",
 			"Give ask_user questions labeled options where possible, keep them self-contained, and put recommended options first.",
-			"Set noWait only when you can keep working without the answers, for example to ask while investigating something else.",
+			'Use mode: "urgent" when input is required before proceeding anywhere. Use mode: "background" (default) for independent work; answers steer the active run at the next model/tool boundary.',
 		],
 		parameters: AskUserParamsSchema,
 		outputSchema: AskUserOutputSchema,
@@ -140,7 +142,8 @@ export default function askQuestionsExtension(pi: ExtensionAPI): void {
 
 			const submitLabel = params.submitLabel?.trim() || DEFAULT_SUBMIT_LABEL;
 
-			if (params.noWait === true && ctx.mode === "tui") {
+			const mode = params.mode ?? (params.noWait === false ? "urgent" : "background");
+			if (mode === "background" && ctx.mode === "tui") {
 				if (backgroundController) {
 					return {
 						content: [
@@ -172,7 +175,7 @@ export default function askQuestionsExtension(pi: ExtensionAPI): void {
 								display: true,
 								details: { cancelled: result.cancelled, answers: result.answers, questions },
 							},
-							{ triggerTurn: true, deliverAs: "followUp" },
+							{ triggerTurn: true, deliverAs: "steer" },
 						);
 					})
 					.catch((error: unknown) => {
@@ -199,7 +202,7 @@ export default function askQuestionsExtension(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: `Questionnaire shown to the user in the background. Continue with other work; the answers will arrive as a follow-up message.`,
+							text: `Questionnaire shown to the user in the background. Continue with other work; the answers will be injected as steering at the next model/tool boundary. Incorporate them before continuing further work.`,
 						},
 					],
 					details: { cancelled: false, pending: true, answers: [], questions },

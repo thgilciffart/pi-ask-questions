@@ -53,7 +53,8 @@ Once installed, run `/ask-demo` to preview the UI, or just let the model call `a
 - **Optional questions** (`required: false`) that can be skipped, plus preset answers (`selected: true`) and defaults.
 - **Review tab** — see your answers and specific validation errors together before submitting; jump back to any question to edit it.
 - **Validation** — required answers and `min`/`max` selection counts are enforced before submit.
-- **Background mode** — set `noWait: true` and the tool returns immediately while the questionnaire stays open; the answers arrive later as a follow-up message.
+- **Urgent mode** — set `mode: "urgent"` to block further work until the questionnaire is answered or cancelled.
+- **Background mode** — use `mode: "background"` (the default) and the tool returns immediately while the questionnaire stays open; answers steer the active run at the next model/tool boundary.
 - **Safe cancel** — `Esc` arms cancellation, a second `Esc` or `Ctrl+C` cancels immediately.
 - **Scrollable option lists** — long lists show “n more above / below” indicators. Use `PageUp` / `PageDown` to move eight rows at a time.
 - **Structured results** — the tool returns text for the model and a machine-readable `structuredContent` payload for codemode scripts.
@@ -130,13 +131,25 @@ Notes: (skipped)
 | `questions[].min` / `max` | integer | Selection bounds for multi-select. |
 | `questions[].placeholder` | string | Placeholder for the free-form editor. |
 | `questions[].otherLabel` | string | Custom label for the typed-answer entry. |
-| `noWait` | boolean | Show the questionnaire in the background and return immediately (interactive TUI only). The answers arrive as a follow-up message. Only one background questionnaire can be open at a time. |
+| `mode` | `"urgent"` / `"background"` | `"urgent"` waits for answers. Default `"background"` returns immediately and delivers answers as steering (interactive TUI only; other interactive modes wait). Only one background questionnaire can be open at a time. |
+| `noWait` | boolean | Compatibility alias: `true` means background, `false` means urgent. An explicit `mode` takes precedence. |
+
+Choose `mode: "urgent"` when the model needs input before proceeding anywhere. Choose `mode: "background"` when it can continue independent work:
+
+```json
+{
+  "mode": "background",
+  "questions": [{ "question": "Which deployment environment should I use?" }]
+}
+```
+
+Background answers use Pi's steering queue, so they are considered at the next model/tool boundary instead of waiting for the agent to finish. Steering does not interrupt a response mid-token or abort a running tool. If the agent has already stopped, submitting answers starts a new turn. Cancellation is also reported. In RPC mode, both modes wait for the dialog answers.
 
 ### Structured results
 
 `structuredContent` mirrors the answers for codemode scripts: `cancelled`, an optional `pending`, and `answers[]` with `{ id, question, skipped, answers: [{ value, label, custom }] }`.
 
-While a background questionnaire is open, `pending` is `true` and each `answers[]` entry is a stub with an empty `answers` array. Branch on `pending` before reading them; the real answers arrive as a follow-up message.
+While a background questionnaire is open, `pending` is `true` and each `answers[]` entry is a stub with an empty `answers` array. Branch on `pending` before reading them; the real answers arrive as a steering message.
 
 ### Keyboard reference
 
@@ -159,8 +172,8 @@ In a multiline extra answer, `↑` / `↓` edits between text lines. Moving up f
 
 | Mode | Behavior |
 | --- | --- |
-| Interactive TUI | Full tabbed questionnaire. |
-| Interactive TUI + `noWait` | Tool returns immediately; answers are delivered as a follow-up message. |
+| Interactive TUI + `mode: "urgent"` | Full tabbed questionnaire; tool waits for answers before further work. |
+| Interactive TUI + `mode: "background"` (default) | Tool returns immediately; answers steer the active run at the next model/tool boundary. |
 | RPC | Sequential fallback built from the dialog API (`select` / `input`). |
 | Print / JSON | The tool reports that no UI is available and lists the questions so the model can ask them in plain text. |
 
