@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-25
+
 ### Changed
 
 - Added explicit `mode: "urgent"` (blocking) and `mode: "background"` (default) choices. `noWait` remains a compatibility alias; an explicit mode takes precedence.
