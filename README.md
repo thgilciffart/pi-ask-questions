@@ -1,6 +1,6 @@
 # pi-ask-questions
 
-Interactive questionnaires for [Pi](https://pi.dev). The `ask_user` tool supports single-choice, multiple-choice, and typed answers.
+Interactive questionnaires for [Pi](https://pi.dev): tabs, multi-select, free-form typing, validation, and structured answers.
 
 ## Install
 

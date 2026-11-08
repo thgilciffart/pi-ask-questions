@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-08
+
+### Documentation
+
+- Simplified the installation and usage guide in README.md and matched the intro to the package description. The npm package is the primary install method: `pi install npm:pi-ask-questions`.
+
 ## [0.4.0] - 2026-10-25
 
 ### Changed
